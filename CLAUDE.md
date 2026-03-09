@@ -84,16 +84,26 @@ Lenovo P620: AMD Threadripper PRO 3945WX (12C/24T), 128 GB RAM, RTX 3090 (24 GB 
 
 GPU budget: ~8-11 GB of 24 GB used (Qwen3 ~3GB + mxbai ~3GB + GLiNER ~3GB + Docling ~1-2GB).
 
-## Host Port Mappings (GPU server has existing services)
+## GPU Server Services
+
+**Cortex-owned containers** (managed by our docker-compose.yml):
 
 | Service | Host Port | Container Port | Notes |
 |---------|-----------|---------------|-------|
-| postgres | 5433 | 5432 | Existing weka PG on 5432 |
-| redis | 6380 | 6379 | Existing weka-redis on 6379 |
-| embedder (TEI) | 8082 | 80 | Existing tei_gateway on 8080, weka-ingestion on 8081 |
-| api | 8090 | 8080 | Existing tei_gateway on 8080 |
+| postgres | 5433 | 5432 | Cortex DB (existing weka PG on 5432) |
+| redis | 6380 | 6379 | Cortex queue (existing weka-redis on 6379) |
+| api | 8090 | 8080 | Cortex API |
+| worker | — | — | Celery worker (no exposed port) |
 
-Internal Docker networking is unaffected — containers reference each other by service name (e.g., `postgres:5432`, `redis:6379`, `embedder:80`). Only the host-mapped ports are remapped to avoid collisions with the existing weka stack.
+**Existing ML services** (shared with weka stack — do NOT duplicate):
+
+| Service | Host Port | Endpoint | Model |
+|---------|-----------|----------|-------|
+| tei_gateway | 8080 | `/v1/embeddings` (OpenAI-compatible) | Routes to qwen3-embedder |
+| mxbai-reranker | 9006 | `/v1/rerank` | mxbai-rerank-large-v2 |
+| tei_gliner | 9002 | `/v1/extract` | gliner_medium-v2.1 |
+
+Cortex containers reach ML services via `host.docker.internal` (mapped to host gateway via `extra_hosts`). Settings use `EMBEDDER_URL`, `RERANKER_URL`, `NER_URL` environment variables.
 
 ---
 

@@ -35,33 +35,11 @@ services:
       retries: 5
     restart: unless-stopped
 
-  embedder:
-    image: ghcr.io/huggingface/text-embeddings-inference:1.7.2
-    container_name: cortex-embedder
-    command: >
-      --model-id Qwen/Qwen3-Embedding-0.6B
-      --dtype float16
-      --max-batch-tokens 16384
-      --max-concurrent-requests 128
-      --port 80
-    ports:
-      - "8082:80"
-    volumes:
-      - hf_cache:/data
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
-      interval: 10s
-      timeout: 10s
-      retries: 30
-      start_period: 120s
-    restart: unless-stopped
+  # ML services (embedder, reranker, NER) are provided by the existing
+  # GPU server infrastructure. Do NOT spin up duplicate containers.
+  # - Embedder gateway: http://host.docker.internal:8080 (/v1/embeddings)
+  # - Reranker:         http://host.docker.internal:9006 (/v1/rerank)
+  # - GLiNER NER:       http://host.docker.internal:9002 (/v1/extract)
 
   api:
     build:
@@ -71,28 +49,22 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://cortex:${POSTGRES_PASSWORD}@postgres:5432/cortex
       REDIS_URL: redis://redis:6379/0
-      EMBEDDER_URL: http://embedder:80
+      # ML services are on the host network (existing infrastructure)
+      EMBEDDER_URL: http://host.docker.internal:8080
+      RERANKER_URL: http://host.docker.internal:9006
+      NER_URL: http://host.docker.internal:9002
       DATA_DIR: /data
-      NVIDIA_VISIBLE_DEVICES: all
     ports:
       - "8090:8080"
     volumes:
       - filedata:/data
-      - hf_cache:/root/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      embedder:
-        condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
 
   worker:
@@ -104,30 +76,22 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://cortex:${POSTGRES_PASSWORD}@postgres:5432/cortex
       REDIS_URL: redis://redis:6379/0
-      EMBEDDER_URL: http://embedder:80
+      EMBEDDER_URL: http://host.docker.internal:8080
+      RERANKER_URL: http://host.docker.internal:9006
+      NER_URL: http://host.docker.internal:9002
       DATA_DIR: /data
-      NVIDIA_VISIBLE_DEVICES: all
     volumes:
       - filedata:/data
-      - hf_cache:/root/.cache/huggingface
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-      embedder:
-        condition: service_healthy
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
     restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
   filedata:
-  hf_cache:

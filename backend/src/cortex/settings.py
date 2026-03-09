@@ -9,9 +9,14 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://cortex:cortex@localhost:5433/cortex"
     redis_url: str = "redis://localhost:6380/0"
-    embedder_url: str = "http://localhost:8082"
     data_dir: str = "/data"
-    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
+
+    # ML services — use existing GPU server infrastructure
+    # Gateway at :8080 provides OpenAI-compatible /v1/embeddings
+    embedder_url: str = "http://localhost:8080"
+    reranker_url: str = "http://localhost:9006"
+    ner_url: str = "http://localhost:9002"
+    embedding_model: str = "qwen3-embedder"
     embedding_dim: int = 1024
 
     # API

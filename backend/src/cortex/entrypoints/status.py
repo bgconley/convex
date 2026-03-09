@@ -33,16 +33,22 @@ async def health_check(request: Request) -> dict:
     except Exception as e:
         checks["redis"] = f"unhealthy: {e}"
 
-    # Check TEI embedder
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.get(f"{settings.embedder_url}/health")
-            if resp.status_code == 200:
-                checks["embedder"] = "healthy"
-            else:
-                checks["embedder"] = f"unhealthy: status {resp.status_code}"
-    except Exception as e:
-        checks["embedder"] = f"unhealthy: {e}"
+    # Check ML services (existing GPU server infrastructure)
+    ml_services = {
+        "embedder": (settings.embedder_url, "/health"),
+        "reranker": (settings.reranker_url, "/health"),
+        "ner": (settings.ner_url, "/healthz"),
+    }
+    for name, (url, health_path) in ml_services.items():
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(f"{url}{health_path}")
+                if resp.status_code == 200:
+                    checks[name] = "healthy"
+                else:
+                    checks[name] = f"unhealthy: status {resp.status_code}"
+        except Exception as e:
+            checks[name] = f"unhealthy: {e}"
 
     all_healthy = all(v == "healthy" for v in checks.values())
     return {
