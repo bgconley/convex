@@ -48,6 +48,7 @@ class DoclingParser:
         )
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import (
+            EasyOcrOptions,
             PdfPipelineOptions,
             TableFormerMode,
             TableStructureOptions,
@@ -71,6 +72,12 @@ class DoclingParser:
         )
         pdf_options.accelerator_options = AcceleratorOptions(
             device=AcceleratorDevice.AUTO,
+        )
+        # EasyOCR with GPU — RapidOCR's ONNX default ignores CUDA
+        pdf_options.ocr_options = EasyOcrOptions(
+            lang=["en"],
+            use_gpu=True,
+            confidence_threshold=0.5,
         )
         # GPU batch sizes — tuned for RTX 3090 (24 GB VRAM)
         pdf_options.ocr_batch_size = 32
