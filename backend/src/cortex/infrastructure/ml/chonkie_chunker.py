@@ -91,7 +91,7 @@ class ChonkieChunker:
         for i, chunk in enumerate(chunks):
             start = chunk.start_index
             end = chunk.end_index
-            section = self._find_section(start, section_map)
+            section = self._find_section(start, end, section_map)
 
             results.append(
                 ChunkResult(
@@ -161,13 +161,23 @@ class ChonkieChunker:
 
     @staticmethod
     def _find_section(
-        char_pos: int, section_map: list[_SectionEntry]
+        start_char: int,
+        end_char: int,
+        section_map: list[_SectionEntry],
     ) -> _SectionEntry | None:
-        """Find the section heading that contains the given character position."""
-        result = None
+        """Find the most relevant section heading for a chunk span.
+
+        Strategy: find the last heading whose start_char falls within
+        the chunk's [start_char, end_char) range. This ensures that if
+        a chunk spans multiple sections, it gets tagged with the most
+        specific heading *inside* the chunk. Falls back to the nearest
+        preceding heading if no heading starts within the chunk.
+        """
+        preceding = None
+        inside = None
         for section in section_map:
-            if section.start_char <= char_pos:
-                result = section
-            else:
-                break
-        return result
+            if section.start_char < start_char:
+                preceding = section
+            elif section.start_char < end_char:
+                inside = section
+        return inside or preceding
