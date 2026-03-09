@@ -29,7 +29,7 @@ class ChonkieChunker:
         self,
         embedding_model: str = "minishlab/potion-base-32M",
         chunk_size: int = 512,
-        similarity_threshold: str | float = "auto",
+        similarity_threshold: float = 0.5,
     ) -> None:
         self._chunk_size = chunk_size
         self._embedding_model = embedding_model
