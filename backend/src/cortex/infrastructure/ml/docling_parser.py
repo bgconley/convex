@@ -105,44 +105,56 @@ class DoclingParser:
         )
 
     async def parse(self, file_path: Path, file_type: str) -> ParseResult:
-        if file_type == "txt":
-            return self._parse_plain_text(file_path)
+        try:
+            if file_type == "txt":
+                return self._parse_plain_text(file_path)
 
-        result = self._converter.convert(str(file_path))
-        doc = result.document
+            # For images: convert to single-page PDF first so the GPU-configured
+            # PDF pipeline (EasyOCR + layout model) handles OCR instead of
+            # Docling's IMAGE pipeline which falls back to RapidOCR/ONNX on CPU.
+            actual_path = file_path
+            temp_pdf = None
+            if file_type in ("png", "jpg", "tiff"):
+                temp_pdf = self._image_to_temp_pdf(file_path)
+                actual_path = temp_pdf
+                file_type = "pdf"
 
-        text = doc.export_to_markdown()
-        rendered_html = doc.export_to_html()
-        structured = doc.export_to_dict()
+            result = self._converter.convert(str(actual_path))
+            doc = result.document
 
-        # Count words from the markdown text
-        word_count = len(text.split()) if text else 0
+            text = doc.export_to_markdown()
+            rendered_html = doc.export_to_html()
+            structured = doc.export_to_dict()
 
-        # Extract page count for PDFs via PyMuPDF (faster than Docling for this)
-        page_count = None
-        thumbnail_data = None
-        images: list[ExtractedImage] = []
+            word_count = len(text.split()) if text else 0
 
-        if file_type == "pdf":
-            page_count, thumbnail_data, images = self._extract_pdf_assets(file_path)
-        elif file_type in ("png", "jpg", "tiff"):
-            thumbnail_data = file_path.read_bytes()
+            page_count = None
+            images: list[ExtractedImage] = []
 
-        # Release GPU memory between documents
-        self._clear_gpu_cache()
+            if file_type == "pdf":
+                page_count, _, images = self._extract_pdf_assets(
+                    actual_path
+                )
 
-        return ParseResult(
-            text=text,
-            structured=structured,
-            rendered_html=rendered_html,
-            rendered_markdown=text,
-            metadata=DocumentMetadata(
+            # Clean up temp PDF if we created one
+            if temp_pdf is not None:
+                temp_pdf.unlink(missing_ok=True)
+
+            return ParseResult(
+                text=text,
+                structured=structured,
+                rendered_html=rendered_html,
+                rendered_markdown=text,
+                metadata=DocumentMetadata(
+                    page_count=page_count,
+                    word_count=word_count,
+                ),
+                images=images,
                 page_count=page_count,
-                word_count=word_count,
-            ),
-            images=images,
-            page_count=page_count,
-        )
+            )
+        finally:
+            # Always release GPU memory after every parse, including txt
+            self._clear_gpu_cache()
 
     @staticmethod
     def _parse_plain_text(file_path: Path) -> ParseResult:
@@ -160,6 +172,26 @@ class DoclingParser:
             rendered_markdown=content,
             metadata=DocumentMetadata(word_count=word_count),
         )
+
+    @staticmethod
+    def _image_to_temp_pdf(image_path: Path) -> Path:
+        """Convert an image file to a single-page PDF so it goes through the
+        GPU-configured PDF pipeline (EasyOCR) instead of the IMAGE pipeline
+        (RapidOCR/ONNX on CPU)."""
+        import fitz  # PyMuPDF
+        import tempfile
+
+        img_doc = fitz.open(str(image_path))
+        pdf_doc = fitz.open()
+        page = img_doc[0]
+        rect = page.rect
+        pdf_page = pdf_doc.new_page(width=rect.width, height=rect.height)
+        pdf_page.insert_image(rect, filename=str(image_path))
+        temp_path = Path(tempfile.mktemp(suffix=".pdf"))
+        pdf_doc.save(str(temp_path))
+        pdf_doc.close()
+        img_doc.close()
+        return temp_path
 
     @staticmethod
     def _extract_pdf_assets(
