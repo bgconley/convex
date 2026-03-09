@@ -1,5 +1,6 @@
 from cortex.application.document_service import DocumentService
 from cortex.infrastructure.file_storage import LocalFileStorage
+from cortex.infrastructure.ml.docling_parser import DoclingParser
 from cortex.infrastructure.persistence.database import create_session_factory
 from cortex.infrastructure.persistence.document_repo import PGDocumentRepository
 from cortex.settings import Settings
@@ -19,6 +20,7 @@ class CompositionRoot:
         # Infrastructure adapters
         self.file_storage = LocalFileStorage(data_dir=settings.data_dir)
         self.doc_repo = PGDocumentRepository(self.session_factory)
+        self.parser = DoclingParser()
 
         # Application services (depend on ports, not concrete types)
         self.document_service = DocumentService(
@@ -26,6 +28,7 @@ class CompositionRoot:
             file_storage=self.file_storage,
         )
 
-        # TODO(Step 1.4+): parser, chunker, embedder, reranker, ner, graph
-        # TODO(Step 1.7): ingestion_service
+        # TODO(Step 1.5): chunker
+        # TODO(Step 1.6): embedder
+        # TODO(Step 1.7): ingestion_service (wires parser + chunker + embedder)
         # TODO(Step 1.8): search_service
