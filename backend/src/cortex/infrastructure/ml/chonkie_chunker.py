@@ -167,17 +167,17 @@ class ChonkieChunker:
     ) -> _SectionEntry | None:
         """Find the most relevant section heading for a chunk span.
 
-        Strategy: find the last heading whose start_char falls within
-        the chunk's [start_char, end_char) range. This ensures that if
-        a chunk spans multiple sections, it gets tagged with the most
-        specific heading *inside* the chunk. Falls back to the nearest
-        preceding heading if no heading starts within the chunk.
+        Strategy: use the heading that the chunk starts under (the last
+        heading at or before start_char). If no heading precedes the
+        chunk but one exists inside it, use the first heading inside.
+        This ensures chunks are tagged with the section their content
+        primarily belongs to, not a heading near the tail of the span.
         """
         preceding = None
-        inside = None
+        first_inside = None
         for section in section_map:
-            if section.start_char < start_char:
+            if section.start_char <= start_char:
                 preceding = section
-            elif section.start_char < end_char:
-                inside = section
-        return inside or preceding
+            elif first_inside is None and section.start_char < end_char:
+                first_inside = section
+        return preceding or first_inside
