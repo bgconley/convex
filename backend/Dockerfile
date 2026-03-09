@@ -20,6 +20,7 @@ COPY pyproject.toml .
 COPY alembic.ini .
 COPY alembic/ alembic/
 COPY src/ src/
+COPY tests/ tests/
 
 # Install dependencies (with CUDA PyTorch)
 RUN uv pip install --system \
