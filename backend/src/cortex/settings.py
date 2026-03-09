@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     embedding_model: str = "qwen3-embedder"
     embedding_dim: int = 1024
 
+    # Chunking
+    chunker_embedding_model: str = "minishlab/potion-base-32M"
+    chunk_size: int = 512
+
     # API
     api_host: str = "0.0.0.0"
     api_port: int = 8080
