@@ -84,6 +84,17 @@ Lenovo P620: AMD Threadripper PRO 3945WX (12C/24T), 128 GB RAM, RTX 3090 (24 GB 
 
 GPU budget: ~8-11 GB of 24 GB used (Qwen3 ~3GB + mxbai ~3GB + GLiNER ~3GB + Docling ~1-2GB).
 
+## Host Port Mappings (GPU server has existing services)
+
+| Service | Host Port | Container Port | Notes |
+|---------|-----------|---------------|-------|
+| postgres | 5433 | 5432 | Existing weka PG on 5432 |
+| redis | 6380 | 6379 | Existing weka-redis on 6379 |
+| embedder (TEI) | 8082 | 80 | Existing tei_gateway on 8080, weka-ingestion on 8081 |
+| api | 8090 | 8080 | Existing tei_gateway on 8080 |
+
+Internal Docker networking is unaffected — containers reference each other by service name (e.g., `postgres:5432`, `redis:6379`, `embedder:80`). Only the host-mapped ports are remapped to avoid collisions with the existing weka stack.
+
 ---
 
 ## Key Contracts

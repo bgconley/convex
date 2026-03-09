@@ -59,7 +59,7 @@ services:
 **Networking:**
 - All services communicate on internal Docker network
 - Only API server exposes port to host (e.g., 8080)
-- macOS frontend connects to API server via `http://<workstation-ip>:8080`
+- macOS frontend connects to API server via `http://<workstation-ip>:8090`
 
 ### 2.3 Directory Structure
 
@@ -470,7 +470,7 @@ CREATE INDEX idx_entity_mentions_document ON entity_mentions(document_id);
 
 ### 4.1 Base URL
 ```
-http://<workstation-ip>:8080/api/v1
+http://<workstation-ip>:8090/api/v1
 ```
 
 ### 4.2 Endpoints

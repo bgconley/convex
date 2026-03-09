@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: cortex
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     command: postgres -c config_file=/etc/postgresql/postgresql.conf
@@ -25,7 +25,7 @@ services:
     image: redis:7-alpine
     container_name: cortex-redis
     ports:
-      - "6379:6379"
+      - "6380:6379"
     volumes:
       - redisdata:/data
     healthcheck:
@@ -45,7 +45,7 @@ services:
       --max-concurrent-requests 128
       --port 80
     ports:
-      - "8081:80"
+      - "8082:80"
     volumes:
       - hf_cache:/data
     deploy:
@@ -75,7 +75,7 @@ services:
       DATA_DIR: /data
       NVIDIA_VISIBLE_DEVICES: all
     ports:
-      - "8080:8080"
+      - "8090:8080"
     volumes:
       - filedata:/data
       - hf_cache:/root/.cache/huggingface
