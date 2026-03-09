@@ -1,0 +1,133 @@
+services:
+  postgres:
+    build:
+      context: ./postgres
+      dockerfile: Dockerfile
+    container_name: cortex-postgres
+    environment:
+      POSTGRES_DB: cortex
+      POSTGRES_USER: cortex
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    command: postgres -c config_file=/etc/postgresql/postgresql.conf
+    shm_size: '4gb'
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cortex -d cortex"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    container_name: cortex-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  embedder:
+    image: ghcr.io/huggingface/text-embeddings-inference:1.7.2
+    container_name: cortex-embedder
+    command: >
+      --model-id Qwen/Qwen3-Embedding-0.6B
+      --dtype float16
+      --max-batch-tokens 16384
+      --max-concurrent-requests 128
+      --port 80
+    ports:
+      - "8081:80"
+    volumes:
+      - hf_cache:/data
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: cortex-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cortex:${POSTGRES_PASSWORD}@postgres:5432/cortex
+      REDIS_URL: redis://redis:6379/0
+      EMBEDDER_URL: http://embedder:80
+      DATA_DIR: /data
+      NVIDIA_VISIBLE_DEVICES: all
+    ports:
+      - "8080:8080"
+    volumes:
+      - filedata:/data
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    container_name: cortex-worker
+    command: celery -A cortex.tasks.celery_app worker --loglevel=info --concurrency=2
+    environment:
+      DATABASE_URL: postgresql+asyncpg://cortex:${POSTGRES_PASSWORD}@postgres:5432/cortex
+      REDIS_URL: redis://redis:6379/0
+      EMBEDDER_URL: http://embedder:80
+      DATA_DIR: /data
+      NVIDIA_VISIBLE_DEVICES: all
+    volumes:
+      - filedata:/data
+      - hf_cache:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      embedder:
+        condition: service_healthy
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  filedata:
+  hf_cache:
