@@ -45,7 +45,6 @@ class ChonkieChunker:
                 embedding_model=self._embedding_model,
                 chunk_size=self._chunk_size,
                 threshold=self._similarity_threshold,
-                min_sentences=1,
             )
         return self._semantic_chunker
 
@@ -54,7 +53,7 @@ class ChonkieChunker:
             from chonkie import RecursiveChunker
 
             self._recursive_chunker = RecursiveChunker(
-                tokenizer_or_token_counter="gpt2",
+                tokenizer="gpt2",
                 chunk_size=self._chunk_size,
                 min_characters_per_chunk=24,
             )
