@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from uuid import UUID as PyUUID
 from uuid import uuid4
 
 from pgvector.sqlalchemy import Vector
@@ -24,11 +25,11 @@ class Base(DeclarativeBase):
 class CollectionRow(Base):
     __tablename__ = "collections"
 
-    id: Mapped[uuid4] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     icon: Mapped[str | None] = mapped_column(String(100))
-    parent_id: Mapped[uuid4 | None] = mapped_column(
+    parent_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("collections.id")
     )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
@@ -41,7 +42,7 @@ class CollectionRow(Base):
 class DocumentRow(Base):
     __tablename__ = "documents"
 
-    id: Mapped[uuid4] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     original_filename: Mapped[str] = mapped_column(Text, nullable=False)
     file_type: Mapped[str] = mapped_column(String(20), nullable=False)
@@ -69,7 +70,7 @@ class DocumentRow(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     processed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
-    collection_id: Mapped[uuid4 | None] = mapped_column(
+    collection_id: Mapped[PyUUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("collections.id", ondelete="SET NULL")
     )
     tags: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
@@ -88,8 +89,8 @@ class ChunkRow(Base):
     __tablename__ = "chunks"
     __table_args__ = (UniqueConstraint("document_id", "chunk_index"),)
 
-    id: Mapped[uuid4] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    document_id: Mapped[uuid4] = mapped_column(
+    id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
 
@@ -114,7 +115,7 @@ class EntityRow(Base):
     __tablename__ = "entities"
     __table_args__ = (UniqueConstraint("normalized_name", "entity_type"),)
 
-    id: Mapped[uuid4] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     entity_type: Mapped[str] = mapped_column(String(50), nullable=False)
     normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
@@ -133,14 +134,14 @@ class EntityMentionRow(Base):
     __tablename__ = "entity_mentions"
     __table_args__ = (UniqueConstraint("entity_id", "chunk_id", "start_char"),)
 
-    id: Mapped[uuid4] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    entity_id: Mapped[uuid4] = mapped_column(
+    id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    entity_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("entities.id", ondelete="CASCADE"), nullable=False
     )
-    chunk_id: Mapped[uuid4] = mapped_column(
+    chunk_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("chunks.id", ondelete="CASCADE"), nullable=False
     )
-    document_id: Mapped[uuid4] = mapped_column(
+    document_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
 
@@ -157,8 +158,8 @@ class EntityMentionRow(Base):
 class DocumentImageRow(Base):
     __tablename__ = "document_images"
 
-    id: Mapped[uuid4] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
-    document_id: Mapped[uuid4] = mapped_column(
+    id: Mapped[PyUUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+    document_id: Mapped[PyUUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
     image_path: Mapped[str] = mapped_column(Text, nullable=False)
