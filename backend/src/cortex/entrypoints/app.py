@@ -4,19 +4,20 @@ from collections.abc import AsyncGenerator
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from cortex.bootstrap import CompositionRoot
 from cortex.settings import Settings
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    # Startup: nothing to do yet — DB pool is created in bootstrap
     yield
-    # Shutdown: cleanup handled by garbage collection
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     if settings is None:
         settings = Settings()
+
+    root = CompositionRoot(settings)
 
     app = FastAPI(
         title="Cortex",
@@ -33,10 +34,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Store settings on app state for access in endpoints
+    # Expose services on app state for endpoint access
     app.state.settings = settings
+    app.state.document_service = root.document_service
+    app.state.file_storage = root.file_storage
 
-    # Import and mount routers
     from cortex.entrypoints.router import api_router
 
     app.include_router(api_router, prefix="/api/v1")
