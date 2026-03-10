@@ -19,13 +19,40 @@ from cortex.domain.entity import EntityExtraction
 
 logger = logging.getLogger(__name__)
 
-# Entity labels per APP_SPEC Section 6.5
+# Entity labels for a broad personal knowledge base.
+# Covers: general, financial, technical, medical, legal, automotive,
+# HR/employment, and meeting/communication domains.
+#
+# GLiNER is zero-shot — labels are text prompts, not a fixed taxonomy.
+# We keep to ~18 broad labels to avoid quality degradation (GLiNER
+# works best with <20 labels per call). Domain-specific subtypes are
+# captured under broader categories (e.g. "medication" covers drugs,
+# "regulation" covers laws/standards/codes).
 ENTITY_LABELS = [
-    "person", "organization", "location", "country", "city",
-    "date", "monetary value",
-    "programming language", "software framework", "database",
-    "algorithm", "protocol", "API", "technology",
-    "product", "company", "methodology",
+    # Universal
+    "person",
+    "organization",
+    "location",
+    "date",
+    "monetary value",
+    "product",
+    "event",
+    # Technical
+    "technology",
+    "software",
+    # Medical / Health
+    "medical condition",
+    "medication",
+    "medical procedure",
+    # Legal / Regulatory
+    "law",
+    "regulation",
+    "contract term",
+    # Financial
+    "financial instrument",
+    "account number",
+    # Automotive / Industrial
+    "vehicle",
 ]
 
 
