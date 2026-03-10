@@ -20,5 +20,7 @@ app.conf.update(
     worker_max_tasks_per_child=50,  # restart workers periodically to free GPU memory
 )
 
-# Auto-discover tasks in cortex.tasks package
-app.autodiscover_tasks(["cortex.tasks"])
+# Explicitly include task modules
+app.conf.update(
+    include=["cortex.tasks.ingest"],
+)
