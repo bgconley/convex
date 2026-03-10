@@ -1,8 +1,10 @@
 from cortex.application.document_service import DocumentService
+from cortex.application.ingestion_service import IngestionService
 from cortex.infrastructure.file_storage import LocalFileStorage
 from cortex.infrastructure.ml.chonkie_chunker import ChonkieChunker
 from cortex.infrastructure.ml.docling_parser import DoclingParser
 from cortex.infrastructure.ml.tei_embedder import TEIEmbedder
+from cortex.infrastructure.persistence.chunk_repo import PGChunkRepository
 from cortex.infrastructure.persistence.database import create_session_factory
 from cortex.infrastructure.persistence.document_repo import PGDocumentRepository
 from cortex.settings import Settings
@@ -22,12 +24,12 @@ class CompositionRoot:
         # Infrastructure adapters
         self.file_storage = LocalFileStorage(data_dir=settings.data_dir)
         self.doc_repo = PGDocumentRepository(self.session_factory)
+        self.chunk_repo = PGChunkRepository(self.session_factory)
         self.parser = DoclingParser()
         self.chunker = ChonkieChunker(
             embedding_model=settings.chunker_embedding_model,
             chunk_size=settings.chunk_size,
         )
-
         self.embedder = TEIEmbedder(
             base_url=settings.embedder_url,
             model=settings.embedding_model,
@@ -38,6 +40,13 @@ class CompositionRoot:
             doc_repo=self.doc_repo,
             file_storage=self.file_storage,
         )
+        self.ingestion_service = IngestionService(
+            parser=self.parser,
+            chunker=self.chunker,
+            embedder=self.embedder,
+            doc_repo=self.doc_repo,
+            chunk_repo=self.chunk_repo,
+            file_storage=self.file_storage,
+        )
 
-        # TODO(Step 1.7): ingestion_service (wires parser + chunker + embedder)
         # TODO(Step 1.8): search_service

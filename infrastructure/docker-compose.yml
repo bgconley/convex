@@ -80,8 +80,14 @@ services:
       context: ../backend
       dockerfile: Dockerfile
     container_name: cortex-worker
-    # TODO(Step 1.7): uncomment profiles line below once celery_app module exists
-    profiles: ["worker"]  # excluded from default `docker compose up` until Step 1.7
+    # Worker needs GPU for Docling parser (via ingestion service)
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
     command: celery -A cortex.tasks.celery_app worker --loglevel=info --concurrency=2
     environment:
       DATABASE_URL: postgresql+asyncpg://cortex:${POSTGRES_PASSWORD}@postgres:5432/cortex

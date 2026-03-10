@@ -49,10 +49,16 @@ async def upload_document(file: UploadFile, request: Request):
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
+    # Enqueue ingestion task for new documents
+    if not is_duplicate:
+        from cortex.tasks.ingest import ingest_document
+
+        ingest_document.delay(str(doc.id))
+
     return DocumentUploadResponse(
         id=doc.id,
         status=doc.status.value,
-        message="Existing document returned" if is_duplicate else "Document uploaded",
+        message="Existing document returned" if is_duplicate else "Document uploaded, processing started",
         is_duplicate=is_duplicate,
     )
 
@@ -180,11 +186,7 @@ async def get_document_chunks(document_id: UUID, request: Request):
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # ChunkRepository not wired yet — will be added in Step 1.5+
-    chunk_repo = getattr(request.app.state, "chunk_repo", None)
-    if chunk_repo is None:
-        return {"chunks": [], "message": "Chunk retrieval not yet implemented"}
-
+    chunk_repo = request.app.state.chunk_repo
     chunks = await chunk_repo.get_by_document(document_id)
     return {
         "chunks": [
@@ -216,10 +218,12 @@ async def reprocess_document(document_id: UUID, request: Request):
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Ingestion task not wired yet — will be added in Step 1.7
+    from cortex.tasks.ingest import ingest_document
+
+    ingest_document.delay(str(document_id))
     return {
         "document_id": str(document_id),
-        "message": "Reprocessing not yet implemented",
+        "message": "Reprocessing started",
     }
 
 

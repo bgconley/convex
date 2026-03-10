@@ -37,7 +37,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     # Expose services on app state for endpoint access
     app.state.settings = settings
     app.state.document_service = root.document_service
+    app.state.ingestion_service = root.ingestion_service
     app.state.file_storage = root.file_storage
+    app.state.chunk_repo = root.chunk_repo
 
     from cortex.entrypoints.router import api_router
 
