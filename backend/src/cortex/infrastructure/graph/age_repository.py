@@ -25,8 +25,13 @@ from cortex.domain.entity import Entity, EntityExtraction
 
 logger = logging.getLogger(__name__)
 
-# AGE requires these SET commands before any cypher() call
-_AGE_PREAMBLE = "LOAD 'age'; SET search_path = ag_catalog, \"$user\", public;"
+# AGE requires these commands before any cypher() call.
+# asyncpg doesn't allow multiple statements in one execute(),
+# so we split them into a list.
+_AGE_PREAMBLE = [
+    "LOAD 'age'",
+    'SET search_path = ag_catalog, "$user", public',
+]
 
 
 class AGEGraphRepository:
@@ -34,6 +39,12 @@ class AGEGraphRepository:
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
+
+    @staticmethod
+    async def _load_age(session: AsyncSession) -> None:
+        """Execute AGE preamble statements (LOAD + SET search_path)."""
+        for stmt in _AGE_PREAMBLE:
+            await session.execute(text(stmt))
 
     async def add_document_entities(
         self,
@@ -53,7 +64,7 @@ class AGEGraphRepository:
 
         async with self._session_factory() as session:
             # Load AGE for this session
-            await session.execute(text(_AGE_PREAMBLE))
+            await self._load_age(session)
 
             # 1. Create/merge Document node
             safe_title = document_title.replace("'", "\\'")
@@ -131,7 +142,7 @@ class AGEGraphRepository:
         hop_pattern = "-[:CO_OCCURS*1..{}]-".format(hops)
 
         async with self._session_factory() as session:
-            await session.execute(text(_AGE_PREAMBLE))
+            await self._load_age(session)
             result = await session.execute(text(
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (start:Entity {{normalized_name: '{safe_name}'}}) "
@@ -164,7 +175,7 @@ class AGEGraphRepository:
         safe_name = normalized_name.replace("'", "\\'")
 
         async with self._session_factory() as session:
-            await session.execute(text(_AGE_PREAMBLE))
+            await self._load_age(session)
             result = await session.execute(text(
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document)-[:MENTIONS]->(e:Entity {{normalized_name: '{safe_name}'}}) "
@@ -185,7 +196,7 @@ class AGEGraphRepository:
     ) -> list[Entity]:
         """Get entities mentioned in a document from the graph."""
         async with self._session_factory() as session:
-            await session.execute(text(_AGE_PREAMBLE))
+            await self._load_age(session)
             result = await session.execute(text(
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document {{doc_id: '{document_id}'}})-[:MENTIONS]->(e:Entity) "
@@ -206,7 +217,7 @@ class AGEGraphRepository:
     async def delete_document(self, document_id: UUID) -> None:
         """Remove a document node and its MENTIONS edges from the graph."""
         async with self._session_factory() as session:
-            await session.execute(text(_AGE_PREAMBLE))
+            await self._load_age(session)
             await session.execute(text(
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document {{doc_id: '{document_id}'}}) "
