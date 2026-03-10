@@ -235,17 +235,14 @@ class AGEGraphRepository:
         async with self._session_factory() as session:
             await self._load_age(session)
 
-            # 1. Find entity nodes that will become orphans after this doc is removed
-            #    (entities mentioned ONLY by this document)
-            orphan_result = await self._cypher(session,
+            # 1. Collect entity names mentioned by this document
+            entity_result = await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document {{doc_id: '{document_id}'}})-[:MENTIONS]->(e:Entity) "
-                f"WHERE NOT EXISTS {{ MATCH (other:Document)-[:MENTIONS]->(e) "
-                f"  WHERE other.doc_id <> '{document_id}' }} "
                 f"RETURN e.normalized_name "
                 f"$$) as (name agtype)"
             )
-            orphan_names = [_unquote_agtype(row[0]) for row in orphan_result.fetchall()]
+            entity_names = [_unquote_agtype(row[0]) for row in entity_result.fetchall()]
 
             # 2. Delete the document node and its MENTIONS edges
             await self._cypher(session,
@@ -255,15 +252,26 @@ class AGEGraphRepository:
                 f"$$) as (v agtype)"
             )
 
-            # 3. Delete orphaned entity nodes (and their CO_OCCURS edges)
-            for name in orphan_names:
+            # 3. For each formerly-mentioned entity, check if it has any
+            #    remaining MENTIONS edges. If not, it's orphaned — delete it.
+            for name in entity_names:
                 safe_name = name.replace("'", "\\'")
-                await self._cypher(session,
+                count_result = await self._cypher(session,
                     f"SELECT * FROM cypher('knowledge_graph', $$ "
-                    f"MATCH (e:Entity {{normalized_name: '{safe_name}'}}) "
-                    f"DETACH DELETE e "
-                    f"$$) as (v agtype)"
+                    f"MATCH (d:Document)-[:MENTIONS]->(e:Entity {{normalized_name: '{safe_name}'}}) "
+                    f"RETURN count(d) "
+                    f"$$) as (cnt agtype)"
                 )
+                row = count_result.fetchone()
+                mention_count = int(str(row[0])) if row else 0
+
+                if mention_count == 0:
+                    await self._cypher(session,
+                        f"SELECT * FROM cypher('knowledge_graph', $$ "
+                        f"MATCH (e:Entity {{normalized_name: '{safe_name}'}}) "
+                        f"DETACH DELETE e "
+                        f"$$) as (v agtype)"
+                    )
 
             await session.commit()
 
