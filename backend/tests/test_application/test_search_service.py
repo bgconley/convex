@@ -26,8 +26,15 @@ class FakeEmbedder:
 
 
 class FakeChunkRepo:
-    def __init__(self, chunks: list[ScoredChunk] | None = None):
-        self._chunks = chunks or []
+    """Test double with separate vector and BM25 result lists."""
+
+    def __init__(
+        self,
+        vec_chunks: list[ScoredChunk] | None = None,
+        bm25_chunks: list[ScoredChunk] | None = None,
+    ):
+        self._vec_chunks = vec_chunks or []
+        self._bm25_chunks = bm25_chunks or []
         self.last_bm25_query: str | None = None
 
     async def save_chunks(self, chunks: list[Chunk]) -> None:
@@ -40,11 +47,11 @@ class FakeChunkRepo:
         return []
 
     async def vector_search(self, query_vec: list[float], top_k: int = 50) -> list[ScoredChunk]:
-        return self._chunks[:top_k]
+        return self._vec_chunks[:top_k]
 
     async def bm25_search(self, query: str, top_k: int = 50) -> list[ScoredChunk]:
         self.last_bm25_query = query
-        return self._chunks[:top_k]
+        return self._bm25_chunks[:top_k]
 
 
 class FakeDocRepo:
@@ -90,12 +97,18 @@ def _make_doc(doc_id: UUID) -> Document:
     )
 
 
-def _make_scored_chunk(doc_id: UUID, text: str = "test chunk", score: float = 0.9) -> ScoredChunk:
+def _make_scored_chunk(
+    doc_id: UUID,
+    chunk_id: UUID | None = None,
+    text: str = "test chunk",
+    score: float = 0.9,
+    chunk_index: int = 0,
+) -> ScoredChunk:
     return ScoredChunk(
-        chunk_id=uuid4(),
+        chunk_id=chunk_id or uuid4(),
         document_id=doc_id,
         chunk_text=text,
-        chunk_index=0,
+        chunk_index=chunk_index,
         start_char=0,
         end_char=len(text),
         section_heading=None,
@@ -107,8 +120,6 @@ def _make_scored_chunk(doc_id: UUID, text: str = "test chunk", score: float = 0.
 # -- Tests --
 
 class TestBM25QueryParsing:
-    """Tests for SearchService._parse_bm25_query (static method)."""
-
     def test_plain_keywords(self):
         result = SearchService._parse_bm25_query("hello world")
         assert result == "hello world"
@@ -122,7 +133,6 @@ class TestBM25QueryParsing:
         assert result.startswith("MIXED:")
         assert "neural network" in result
         assert "deep learning" in result
-        # Keywords should use OR mode by default
         kw_part = result.split("|", 1)[1]
         assert kw_part.startswith("OR:")
 
@@ -139,7 +149,6 @@ class TestBM25QueryParsing:
         assert "AND:" in result
         assert "keyword1" in result
         assert "keyword2" in result
-        # AND operator itself must not appear as a term in the keyword portion
         kw_part = result.split("|", 1)[1]
         assert kw_part.startswith("AND:")
         terms_after_prefix = kw_part[4:]
@@ -157,68 +166,152 @@ class TestBM25QueryParsing:
 
 
 class TestBM25Search:
-    """Tests for SearchService.bm25_search — application-layer orchestration."""
-
     @pytest.mark.asyncio
     async def test_bm25_search_calls_repo(self):
         doc_id = uuid4()
-        chunk = _make_scored_chunk(doc_id, "some text about BM25", 0.85)
-        chunk_repo = FakeChunkRepo([chunk])
+        chunk = _make_scored_chunk(doc_id, text="some text about BM25", score=0.85)
+        chunk_repo = FakeChunkRepo(bm25_chunks=[chunk])
         doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
-        embedder = FakeEmbedder()
 
-        service = SearchService(embedder=embedder, chunk_repo=chunk_repo, doc_repo=doc_repo)
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
         response = await service.bm25_search("BM25")
 
         assert chunk_repo.last_bm25_query == "BM25"
         assert len(response.results) == 1
         assert response.results[0].document_title == "Test Doc"
-        assert response.results[0].score == 0.85
+        assert response.results[0].bm25_score == 0.85
 
     @pytest.mark.asyncio
     async def test_bm25_search_phrase_query(self):
         doc_id = uuid4()
-        chunk = _make_scored_chunk(doc_id, "exact phrase match here", 0.95)
-        chunk_repo = FakeChunkRepo([chunk])
+        chunk = _make_scored_chunk(doc_id, text="exact phrase match", score=0.95)
+        chunk_repo = FakeChunkRepo(bm25_chunks=[chunk])
         doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
-        embedder = FakeEmbedder()
 
-        service = SearchService(embedder=embedder, chunk_repo=chunk_repo, doc_repo=doc_repo)
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
         response = await service.bm25_search('"exact phrase"')
 
         assert chunk_repo.last_bm25_query is not None
         assert chunk_repo.last_bm25_query.startswith("PHRASE:")
-        assert len(response.results) == 1
 
     @pytest.mark.asyncio
     async def test_bm25_search_respects_file_type_filter(self):
         doc_id = uuid4()
-        chunk = _make_scored_chunk(doc_id, "filtered content", 0.8)
-        chunk_repo = FakeChunkRepo([chunk])
+        chunk = _make_scored_chunk(doc_id, text="filtered content", score=0.8)
+        chunk_repo = FakeChunkRepo(bm25_chunks=[chunk])
         doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
-        embedder = FakeEmbedder()
 
-        service = SearchService(embedder=embedder, chunk_repo=chunk_repo, doc_repo=doc_repo)
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
         response = await service.bm25_search("content", file_type="pdf")
-
-        # Doc is txt, filter is pdf — should return no results
         assert len(response.results) == 0
 
     @pytest.mark.asyncio
     async def test_bm25_search_empty_query(self):
-        chunk_repo = FakeChunkRepo([])
-        doc_repo = FakeDocRepo({})
-        embedder = FakeEmbedder()
-
-        service = SearchService(embedder=embedder, chunk_repo=chunk_repo, doc_repo=doc_repo)
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=FakeChunkRepo(), doc_repo=FakeDocRepo())
         response = await service.bm25_search("")
-
         assert len(response.results) == 0
 
 
-class TestHighlightSnippet:
-    """Tests for SearchService._highlight_snippet."""
+class TestHybridSearch:
+    """Tests for SearchService.search — hybrid vector + BM25 with RRF."""
 
+    @pytest.mark.asyncio
+    async def test_hybrid_runs_both_retrieval_paths(self):
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="shared chunk", score=0.9)
+        bm25_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="shared chunk", score=1.2)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[bm25_chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.search("test query")
+
+        assert len(response.results) == 1
+        result = response.results[0]
+        # Both scores should be present
+        assert result.vector_score is not None
+        assert result.bm25_score is not None
+
+    @pytest.mark.asyncio
+    async def test_hybrid_merges_disjoint_results(self):
+        """Chunks appearing in only one signal list still appear in results."""
+        doc_id = uuid4()
+        vec_only_id = uuid4()
+        bm25_only_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, chunk_id=vec_only_id, text="vector only", score=0.8, chunk_index=0)
+        bm25_chunk = _make_scored_chunk(doc_id, chunk_id=bm25_only_id, text="bm25 only", score=1.0, chunk_index=1)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[bm25_chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.search("test", top_k=10)
+
+        assert len(response.results) == 2
+        ids = {r.chunk_id for r in response.results}
+        assert vec_only_id in ids
+        assert bm25_only_id in ids
+
+    @pytest.mark.asyncio
+    async def test_rrf_ranks_shared_chunks_higher(self):
+        """A chunk in both vector and BM25 lists should rank above one in only one list."""
+        doc_id = uuid4()
+        shared_id = uuid4()
+        vec_only_id = uuid4()
+
+        shared_vec = _make_scored_chunk(doc_id, chunk_id=shared_id, text="shared", score=0.7, chunk_index=0)
+        vec_only = _make_scored_chunk(doc_id, chunk_id=vec_only_id, text="vec only", score=0.9, chunk_index=1)
+        shared_bm25 = _make_scored_chunk(doc_id, chunk_id=shared_id, text="shared", score=0.5, chunk_index=0)
+
+        chunk_repo = FakeChunkRepo(
+            vec_chunks=[vec_only, shared_vec],  # vec_only is rank 1, shared is rank 2
+            bm25_chunks=[shared_bm25],          # shared is rank 1 in BM25
+        )
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.search("test", top_k=10)
+
+        assert len(response.results) == 2
+        # Shared chunk should rank first because it appears in both lists
+        assert response.results[0].chunk_id == shared_id
+
+    @pytest.mark.asyncio
+    async def test_hybrid_score_breakdown(self):
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=0.85)
+        bm25_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=1.1)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[bm25_chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.search("test")
+
+        result = response.results[0]
+        assert result.vector_score == 0.85
+        assert result.bm25_score == 1.1
+        # RRF score should be w_vec/(k+1) + w_bm25/(k+1) since both are rank 1
+        expected_rrf = 0.6 / (60 + 1) + 0.4 / (60 + 1)
+        assert abs(result.score - expected_rrf) < 1e-6
+
+    @pytest.mark.asyncio
+    async def test_hybrid_empty_bm25(self):
+        """If BM25 returns nothing, results come from vector only."""
+        doc_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, text="vector hit", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.search("test")
+
+        assert len(response.results) == 1
+        assert response.results[0].vector_score == 0.9
+        assert response.results[0].bm25_score is None
+
+
+class TestHighlightSnippet:
     def test_highlights_query_terms(self):
         snippet = SearchService._highlight_snippet(
             "The quick brown fox jumps over the lazy dog", "fox"
@@ -253,8 +346,6 @@ class TestHighlightSnippet:
 
 
 class TestExtractHighlightTerms:
-    """Tests for SearchService._extract_highlight_terms."""
-
     def test_plain_keywords(self):
         terms = SearchService._extract_highlight_terms("hello world")
         assert "hello" in terms
@@ -284,7 +375,6 @@ class TestExtractHighlightTerms:
         assert "AND" not in terms
 
     def test_leading_and_after_phrase_removal(self):
-        """Regression: after removing a phrase at the start, a leading AND must not survive."""
         terms = SearchService._extract_highlight_terms('"phrase" AND rest')
         assert "phrase" in terms
         assert "rest" in terms

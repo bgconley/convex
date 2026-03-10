@@ -34,7 +34,10 @@ async def search(body: SearchRequest, request: Request):
                 section_heading=r.section_heading,
                 page_number=r.page_number,
                 score=r.score,
-                score_breakdown=ScoreBreakdown(vector_score=r.score),
+                score_breakdown=ScoreBreakdown(
+                    vector_score=r.vector_score,
+                    bm25_score=r.bm25_score,
+                ),
                 chunk_start_char=r.chunk_start_char,
                 chunk_end_char=r.chunk_end_char,
                 anchor_id=r.anchor_id,
