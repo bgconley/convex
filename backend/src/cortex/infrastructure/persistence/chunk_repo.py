@@ -84,8 +84,10 @@ class PGChunkRepository:
     async def bm25_search(
         self, query: str, top_k: int = 50
     ) -> list[ScoredChunk]:
-        # BM25 via pg_search — will be implemented in Step 2.1
-        return []
+        from cortex.infrastructure.search.bm25_search import BM25SearchAdapter
+
+        adapter = BM25SearchAdapter(self._session_factory)
+        return await adapter.search(query, top_k=top_k)
 
     @staticmethod
     def _to_domain(row: ChunkRow) -> Chunk:
