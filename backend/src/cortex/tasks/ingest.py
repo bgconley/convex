@@ -7,45 +7,39 @@ from cortex.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
 
-# Lazy-initialized composition root (per worker process)
-_root = None
 
+async def _run_ingestion(document_id: str) -> dict:
+    """Create all async resources fresh for this invocation.
 
-def _get_root():
-    global _root
-    if _root is None:
-        from cortex.bootstrap import CompositionRoot
-        from cortex.settings import Settings
+    Each Celery task runs in its own event loop. Async resources
+    (SQLAlchemy engine, httpx client) are loop-bound and cannot
+    be reused across loops. So we create a full CompositionRoot
+    per task and tear it down afterward.
+    """
+    from uuid import UUID
 
-        _root = CompositionRoot(Settings())
-    return _root
+    from cortex.bootstrap import CompositionRoot
+    from cortex.settings import Settings
+
+    root = CompositionRoot(Settings())
+    doc_id = UUID(document_id)
+
+    try:
+        await root.ingestion_service.ingest(doc_id)
+        return {"document_id": document_id, "status": "ready"}
+    finally:
+        await root.embedder.close()
 
 
 @app.task(bind=True, name="cortex.tasks.ingest_document", max_retries=2)
 def ingest_document(self, document_id: str) -> dict:
-    """Celery task: run the full ingestion pipeline for a document.
-
-    This is a sync wrapper around the async IngestionService.ingest().
-    The composition root is lazy-initialized once per worker process.
-    """
-    from uuid import UUID
-
-    root = _get_root()
-    doc_id = UUID(document_id)
-
+    """Celery task: run the full ingestion pipeline for a document."""
     logger.info("Starting ingestion task for document %s", document_id)
 
     try:
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        try:
-            loop.run_until_complete(root.ingestion_service.ingest(doc_id))
-        finally:
-            loop.close()
-
+        result = asyncio.run(_run_ingestion(document_id))
         logger.info("Ingestion task completed for document %s", document_id)
-        return {"document_id": document_id, "status": "ready"}
-
+        return result
     except Exception as exc:
         logger.exception("Ingestion task failed for document %s", document_id)
         raise self.retry(exc=exc, countdown=30)
