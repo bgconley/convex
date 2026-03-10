@@ -15,6 +15,26 @@ Cortex is a personal knowledge base with a native macOS frontend (Swift/SwiftUI)
 
 ---
 
+## Implementation Progress
+
+### Completed (verified on GPU server)
+- **Step 1.1** — Infrastructure: Docker Compose, custom PG16 (pgvector 0.8.1 + pg_search 0.21.13 + AGE 1.5.0), Redis
+- **Step 1.2** — Backend scaffolding: layered architecture, domain entities/ports, ORM tables, FastAPI app, Alembic migration (6 tables), health endpoint
+- **Step 1.3** — Document upload & CRUD: file storage, PG repository, duplicate detection (SHA-256), all 11 document endpoints
+- **Step 1.4** — Document parsing: Docling with GPU (CUDA layout + EasyOCR), PyMuPDF thumbnails, plain text and image support (images convert to temp PDF for GPU OCR path)
+- **Step 1.5** — Chunking: Chonkie SemanticChunker (potion-base-32M, threshold=0.5, chunk_size=512), section heading attribution, recursive fallback
+- **Step 1.6** — Embedding: TEI client via existing gateway (:8080), OpenAI-compatible /v1/embeddings, 1024-dim vectors, pgvector storage verified
+- **Step 1.7** — Ingestion pipeline: Celery task (parse→chunk→embed→store), status lifecycle transitions, idempotent reprocessing. Fresh CompositionRoot per task to avoid event loop bugs.
+- **Step 1.8** — Vector search: POST /search endpoint, pgvector HNSW, snippet highlighting with `<mark>`, anchor_id for jump-to-hit, `<span id="chunk-N">` injection in structured content
+- **Step 1.9** — macOS app scaffolding: SPM multi-target (Domain/AppCore/Infrastructure/Bootstrap/CortexApp), swift-tools-version 6.0, 4 tests passing, NavigationSplitView with health status
+
+### Next Step
+- **Step 1.10** — macOS App: Document Library & Import (grid/list view, drag-and-drop, thumbnails, file picker)
+- Then: Step 1.11 (Document Viewer), Step 1.12 (Basic Search UI)
+- Then: Phase 2 (BM25 hybrid search + reranking), Phase 3 (NER + knowledge graph), Phase 4 (polish)
+
+---
+
 ## Architecture Rules
 
 ### Python Backend (`backend/`)
@@ -44,11 +64,11 @@ entrypoints/ → application/ → domain/ ← infrastructure/
 
 ### Swift Frontend (`frontend/`)
 
-**SPM multi-target with compiler-enforced dependencies:**
+**SPM multi-target with compiler-enforced dependencies (swift-tools-version 6.0):**
 ```
 Domain:         []
 AppCore:        ["Domain"]
-Infrastructure: ["Domain"]
+Infrastructure: ["Domain", swift-markdown]
 Bootstrap:      ["Domain", "AppCore", "Infrastructure"]
 CortexApp:      ["Bootstrap"]
 ```
@@ -56,11 +76,12 @@ CortexApp:      ["Bootstrap"]
 **Strict rules:**
 - Domain entities are `struct` (value types), `Sendable`, `Equatable`.
 - Port protocols use `package` access level and `Sendable` conformance.
-- Services use `any ProtocolName` existentials for DI.
+- Services use `any ProtocolName` existentials for DI. Services are `actor` types.
 - `CompositionRoot` in `Bootstrap/` is the only place that wires concrete to abstract.
 - One primary type per file, named after the type.
 - No `Utilities/` or `Helpers/` directories.
-- Tests use protocol test doubles (`final class`), no mocking frameworks.
+- Tests use protocol test doubles (`final class` with `@unchecked Sendable`), no mocking frameworks.
+- Tests require Xcode SDK: `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test`
 
 ---
 
@@ -72,28 +93,26 @@ CortexApp:      ["Bootstrap"]
 | API | Python FastAPI + Uvicorn |
 | Tasks | Celery + Redis |
 | Database | PostgreSQL 16 + pgvector + pg_search (ParadeDB) + Apache AGE |
-| Embedding | Qwen3-Embedding-0.6B via HuggingFace TEI (Docker, GPU) |
-| Reranker | mxbai-rerank-large-v2 (GPU) |
-| NER | GLiNER large v2.5 (GPU) |
-| Parser | Docling (primary, GPU-accelerated) + marker-pdf fallback |
-| Chunker | Chonkie (SemanticChunker) |
+| Embedding | Qwen3-Embedding-0.6B via existing TEI gateway |
+| Reranker | mxbai-rerank-large-v2 via existing service |
+| NER | GLiNER medium v2.1 via existing service |
+| Parser | Docling (GPU-accelerated: CUDA layout + EasyOCR) |
+| Chunker | Chonkie SemanticChunker (potion-base-32M) |
 
 ## Hardware Target
 
 Lenovo P620: AMD Threadripper PRO 3945WX (12C/24T), 128 GB RAM, RTX 3090 (24 GB VRAM), 2 TB NVMe SSD.
 
-GPU budget: ~8-11 GB of 24 GB used (Qwen3 ~3GB + mxbai ~3GB + GLiNER ~3GB + Docling ~1-2GB).
-
 ## GPU Server Services
 
-**Cortex-owned containers** (managed by our docker-compose.yml):
+**Cortex-owned containers** (managed by `infrastructure/docker-compose.yml`):
 
 | Service | Host Port | Container Port | Notes |
 |---------|-----------|---------------|-------|
 | postgres | 5433 | 5432 | Cortex DB (existing weka PG on 5432) |
 | redis | 6380 | 6379 | Cortex queue (existing weka-redis on 6379) |
-| api | 8090 | 8080 | Cortex API |
-| worker | — | — | Celery worker (no exposed port) |
+| api | 8090 | 8080 | Cortex API (has GPU passthrough for Docling) |
+| worker | — | — | Celery worker (has GPU passthrough for Docling) |
 
 **Existing ML services** (shared with weka stack — do NOT duplicate):
 
@@ -122,41 +141,47 @@ One canonical document per SHA-256 hash. Duplicate upload returns existing docum
 ### Search Hit Navigation
 Search results include `page_number`, `chunk_start_char`, `chunk_end_char`, and `anchor_id`. Structured views inject `<span id="chunk-N">` anchors. PDFs scroll to page; HTML/structured views scroll to anchor.
 
+### Celery Task Pattern
+Each Celery task creates a **fresh CompositionRoot** inside `asyncio.run()`. Do NOT cache the root or any async resources (SQLAlchemy engine, httpx client) across task invocations — they are event-loop-bound and will fail with "Future attached to a different loop" on the second task.
+
 ---
 
 ## Build & Run
 
 ```bash
-# Infrastructure
+# Infrastructure (GPU server)
 cd infrastructure && docker compose up -d
 
-# Backend (dev)
-cd backend && uv sync && uv run alembic upgrade head && uv run python -m cortex
+# Backend (GPU server — containers)
+cd infrastructure && docker compose build api worker && docker compose up -d api worker
 
-# Frontend
+# Backend (GPU server — host venv for testing)
+cd backend && uv venv .venv && uv pip install -e ".[dev]" --python .venv/bin/python
+
+# Frontend (Mac)
 cd frontend && swift build && open Package.swift  # opens in Xcode
 ```
 
 ## Testing
 
-### Unit Tests (local)
+### Unit Tests (Mac, local)
 ```bash
-# Backend unit + application tests (no GPU, no DB needed)
-cd backend && uv run pytest tests/test_domain/ tests/test_application/
+# Backend domain + application tests (no GPU, no DB needed)
+cd backend && .venv/bin/python -m pytest tests/test_domain/
 
-# Frontend
-cd frontend && swift test
+# Frontend (requires Xcode SDK)
+cd frontend && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
 ```
 
-### Integration Tests (GPU server)
+### Integration / Inspection Tests (GPU server)
 
-Integration tests run on the GPU server (Lenovo P620) where the Docker infrastructure, ML models, and database are running. They cannot run locally on the Mac.
+Integration tests and inspection scripts run on the GPU server inside the containers.
 
 **GPU Server:**
 - Host: `10.25.0.50`
 - User: `bgconley`
 - SSH key: `/Users/brennanconley/vibecode/infx/ubuntu24_ed25519`
-- Existing TEI container already running on this server
+- Repo location: `~/convex`
 - Repo remote: `https://github.com/bgconley/convex.git`
 
 **SSH shorthand:**
@@ -164,27 +189,31 @@ Integration tests run on the GPU server (Lenovo P620) where the Docker infrastru
 ssh -i /Users/brennanconley/vibecode/infx/ubuntu24_ed25519 bgconley@10.25.0.50
 ```
 
-**Integration test workflow:**
-1. Commit and push changes from the Mac
-2. SSH to GPU server
-3. Pull latest, rebuild affected containers, restart
-4. Run integration tests on the server
-
+**Deploy + test workflow:**
 ```bash
 # 1. From Mac: commit and push
-git add -A && git commit -m "..." && git push origin main
+git push origin main
 
 # 2. SSH to GPU server and deploy
-ssh -i /Users/brennanconley/vibecode/infx/ubuntu24_ed25519 bgconley@10.25.0.50 << 'EOF'
-  cd ~/convex                           # or wherever the repo lives on the server
-  git pull origin main
-  cd infrastructure
-  docker compose build api worker       # rebuild only changed services
-  docker compose up -d api worker       # restart changed services
-  cd ../backend
-  uv run pytest tests/test_infrastructure/ tests/test_entrypoints/  # integration tests
-EOF
+ssh -i /Users/brennanconley/vibecode/infx/ubuntu24_ed25519 bgconley@10.25.0.50
+cd ~/convex && git pull origin main
+cd infrastructure && docker compose build api worker && docker compose up -d api worker
+
+# 3. Run inspection scripts inside containers
+docker compose exec -T api python /app/tests/test_ingestion_inspect.py
+docker compose exec -T api python /app/tests/test_search_inspect.py
+docker compose exec -T api python /app/tests/test_embedder_inspect.py
+docker compose exec -T api python /app/tests/test_chunker_inspect.py
 ```
+
+**Inspection scripts available in containers:**
+
+| Script | Tests |
+|--------|-------|
+| `test_ingestion_inspect.py` | Full pipeline: upload → parse → chunk → embed → search → cleanup |
+| `test_search_inspect.py` | 4-query search across 3 documents, ranking verification |
+| `test_embedder_inspect.py` | Batch embed, query embed, cosine similarity, pgvector round-trip |
+| `test_chunker_inspect.py` | Semantic chunking, section mapping, Docling structured dict inspection |
 
 **What runs where:**
 
@@ -192,6 +221,14 @@ EOF
 |------------|-------|-----|
 | `test_domain/` | Mac (local) | Pure logic, no deps |
 | `test_application/` | Mac (local) | Protocol test doubles, no GPU/DB |
-| `test_infrastructure/` | GPU server | Needs PostgreSQL, TEI, GPU models |
-| `test_entrypoints/` | GPU server | Needs running API + DB |
-| `test_e2e/` | GPU server | Full pipeline: upload → process → search |
+| Inspection scripts | GPU server (in container) | Need PostgreSQL, TEI, GPU models |
+| Frontend tests | Mac (local, needs Xcode SDK) | SwiftUI, no backend needed |
+
+## Known Issues / Caveats
+
+- **Docling VRAM**: Call `torch.cuda.empty_cache()` after every parse (in `finally` block). Known Docling memory leak on repeated conversions.
+- **Image OCR path**: Images (.png/.jpg/.tiff) are converted to temp PDF first so they go through the GPU-configured PDF pipeline (EasyOCR) rather than Docling's IMAGE pipeline which falls back to RapidOCR/ONNX on CPU.
+- **Chunker section mapping**: Uses the heading the chunk starts under (nearest preceding heading). Not the heading inside the chunk span.
+- **Celery event loop**: Fresh CompositionRoot per task. See "Celery Task Pattern" above.
+- **Swift tests**: Require `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` because default CommandLineTools SDK lacks XCTest.
+- **WebSocket events**: `/ws/events` endpoint and Redis pub/sub bridge are specified in the plan but not yet implemented. Status updates currently require polling.
