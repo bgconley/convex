@@ -3,7 +3,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from cortex.domain.document import Document, FileType, ProcessingStatus
-from cortex.domain.ports import DocumentRepository, FileStoragePort
+from cortex.domain.ports import DocumentRepository, EntityRepository, FileStoragePort, GraphPort
 from cortex.infrastructure.file_storage import LocalFileStorage
 
 
@@ -45,9 +45,13 @@ class DocumentService:
         self,
         doc_repo: DocumentRepository,
         file_storage: FileStoragePort,
+        entity_repo: EntityRepository | None = None,
+        graph_repo: GraphPort | None = None,
     ) -> None:
         self._doc_repo = doc_repo
         self._file_storage = file_storage
+        self._entity_repo = entity_repo
+        self._graph_repo = graph_repo
 
     async def upload(
         self,
@@ -155,6 +159,11 @@ class DocumentService:
         doc = await self._doc_repo.get(document_id)
         if doc is None:
             return False
+        # Clean up graph nodes and entity mentions before deleting the document
+        if self._graph_repo:
+            await self._graph_repo.delete_document(document_id)
+        if self._entity_repo:
+            await self._entity_repo.delete_by_document(document_id)
         await self._file_storage.delete_document_files(document_id)
         await self._doc_repo.delete(document_id)
         return True

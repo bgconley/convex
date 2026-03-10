@@ -48,6 +48,8 @@ class CompositionRoot:
         self.document_service = DocumentService(
             doc_repo=self.doc_repo,
             file_storage=self.file_storage,
+            entity_repo=self.entity_repo,
+            graph_repo=self.graph_repo,
         )
         self.ingestion_service = IngestionService(
             parser=self.parser,

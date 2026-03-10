@@ -17,10 +17,11 @@ from __future__ import annotations
 import logging
 from uuid import UUID, uuid4
 
-from sqlalchemy import text
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cortex.domain.entity import Entity, EntityExtraction
+from cortex.infrastructure.persistence.tables import EntityRow
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +130,21 @@ class AGEGraphRepository:
     async def get_related_entities(
         self, entity_id: UUID, hops: int = 2
     ) -> list[Entity]:
-        """Traverse CO_OCCURS edges. Requires normalized_name — see get_related_by_name."""
-        return []
+        """Traverse CO_OCCURS edges to find related entities."""
+        async with self._session_factory() as session:
+            row = await session.get(EntityRow, entity_id)
+            if row is None:
+                return []
+            related_dicts = await self.get_related_by_name(row.normalized_name, hops=hops)
+            return [
+                Entity(
+                    id=uuid4(),
+                    name=r["name"],
+                    entity_type=r["type"],
+                    normalized_name=r["normalized_name"],
+                )
+                for r in related_dicts
+            ]
 
     async def get_related_by_name(
         self, normalized_name: str, hops: int = 2, limit: int = 20
@@ -162,8 +176,13 @@ class AGEGraphRepository:
     async def get_entity_documents(
         self, entity_id: UUID
     ) -> list[tuple[UUID, str]]:
-        """Get documents mentioning an entity. Requires normalized_name — see get_entity_documents_by_name."""
-        return []
+        """Get documents that mention a given entity."""
+        async with self._session_factory() as session:
+            row = await session.get(EntityRow, entity_id)
+            if row is None:
+                return []
+            doc_dicts = await self.get_entity_documents_by_name(row.normalized_name)
+            return [(d["document_id"], d["title"]) for d in doc_dicts]
 
     async def get_entity_documents_by_name(
         self, normalized_name: str
