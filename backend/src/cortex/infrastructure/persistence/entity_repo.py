@@ -129,10 +129,44 @@ class PGEntityRepository:
             return self._to_domain(row) if row else None
 
     async def delete_by_document(self, document_id: UUID) -> None:
+        """Delete mentions for a document, recompute counts, remove orphaned entities."""
         async with self._session_factory() as session:
+            # Find affected entity IDs before deleting mentions
+            affected_stmt = (
+                select(EntityMentionRow.entity_id)
+                .where(EntityMentionRow.document_id == document_id)
+                .distinct()
+            )
+            affected_result = await session.execute(affected_stmt)
+            affected_ids = [row[0] for row in affected_result.fetchall()]
+
+            # Delete mention rows for this document
             await session.execute(
                 delete(EntityMentionRow).where(EntityMentionRow.document_id == document_id)
             )
+
+            # Recompute counts and remove orphans
+            for entity_id in affected_ids:
+                mention_count = await session.scalar(
+                    select(func.count()).where(EntityMentionRow.entity_id == entity_id)
+                )
+                if mention_count == 0:
+                    # No remaining mentions — delete the entity
+                    await session.execute(
+                        delete(EntityRow).where(EntityRow.id == entity_id)
+                    )
+                else:
+                    # Recompute counts
+                    doc_count = await session.scalar(
+                        select(func.count(func.distinct(EntityMentionRow.document_id))).where(
+                            EntityMentionRow.entity_id == entity_id
+                        )
+                    )
+                    entity_row = await session.get(EntityRow, entity_id)
+                    if entity_row:
+                        entity_row.mention_count = mention_count
+                        entity_row.document_count = doc_count or 0
+
             await session.commit()
 
     @staticmethod

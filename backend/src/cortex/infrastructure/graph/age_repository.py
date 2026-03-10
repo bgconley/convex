@@ -231,15 +231,40 @@ class AGEGraphRepository:
             ]
 
     async def delete_document(self, document_id: UUID) -> None:
-        """Remove a document node and its MENTIONS edges from the graph."""
+        """Remove a document node, its edges, and orphaned entity nodes."""
         async with self._session_factory() as session:
             await self._load_age(session)
+
+            # 1. Find entity nodes that will become orphans after this doc is removed
+            #    (entities mentioned ONLY by this document)
+            orphan_result = await self._cypher(session,
+                f"SELECT * FROM cypher('knowledge_graph', $$ "
+                f"MATCH (d:Document {{doc_id: '{document_id}'}})-[:MENTIONS]->(e:Entity) "
+                f"WHERE NOT EXISTS {{ MATCH (other:Document)-[:MENTIONS]->(e) "
+                f"  WHERE other.doc_id <> '{document_id}' }} "
+                f"RETURN e.normalized_name "
+                f"$$) as (name agtype)"
+            )
+            orphan_names = [_unquote_agtype(row[0]) for row in orphan_result.fetchall()]
+
+            # 2. Delete the document node and its MENTIONS edges
             await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document {{doc_id: '{document_id}'}}) "
                 f"DETACH DELETE d "
                 f"$$) as (v agtype)"
             )
+
+            # 3. Delete orphaned entity nodes (and their CO_OCCURS edges)
+            for name in orphan_names:
+                safe_name = name.replace("'", "\\'")
+                await self._cypher(session,
+                    f"SELECT * FROM cypher('knowledge_graph', $$ "
+                    f"MATCH (e:Entity {{normalized_name: '{safe_name}'}}) "
+                    f"DETACH DELETE e "
+                    f"$$) as (v agtype)"
+                )
+
             await session.commit()
 
 
