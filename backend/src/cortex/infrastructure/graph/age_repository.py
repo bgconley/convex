@@ -8,13 +8,12 @@ Node types:
   - Entity: {normalized_name, type, name}
 
 Edge types:
-  - MENTIONS: Document → Entity (with count, confidence)
-  - CO_OCCURS: Entity → Entity (with count, for entities in same chunk)
+  - MENTIONS: Document -> Entity (with count, confidence)
+  - CO_OCCURS: Entity -> Entity (with count, for entities in same chunk)
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from uuid import UUID, uuid4
 
@@ -26,8 +25,7 @@ from cortex.domain.entity import Entity, EntityExtraction
 logger = logging.getLogger(__name__)
 
 # AGE requires these commands before any cypher() call.
-# asyncpg doesn't allow multiple statements in one execute(),
-# so we split them into a list.
+# asyncpg doesn't allow multiple statements in one execute().
 _AGE_PREAMBLE = [
     "LOAD 'age'",
     'SET search_path = ag_catalog, "$user", public',
@@ -42,9 +40,19 @@ class AGEGraphRepository:
 
     @staticmethod
     async def _load_age(session: AsyncSession) -> None:
-        """Execute AGE preamble statements (LOAD + SET search_path)."""
+        """Execute AGE preamble statements."""
         for stmt in _AGE_PREAMBLE:
             await session.execute(text(stmt))
+
+    @staticmethod
+    async def _cypher(session: AsyncSession, sql: str):
+        """Execute raw SQL containing Cypher.
+
+        Uses exec_driver_sql to avoid SQLAlchemy interpreting
+        Cypher edge labels like [:MENTIONS] as bind parameters.
+        """
+        raw_conn = await session.connection()
+        return await raw_conn.exec_driver_sql(sql)
 
     async def add_document_entities(
         self,
@@ -53,28 +61,22 @@ class AGEGraphRepository:
         entities: list[EntityExtraction],
         chunk_ids: list[UUID],
     ) -> None:
-        """Populate the knowledge graph for a document's extracted entities.
-
-        1. Create/merge Document node
-        2. Create/merge Entity nodes + MENTIONS edges
-        3. Create CO_OCCURS edges for entities in the same chunk
-        """
+        """Populate the knowledge graph for a document's extracted entities."""
         if not entities:
             return
 
         async with self._session_factory() as session:
-            # Load AGE for this session
             await self._load_age(session)
 
             # 1. Create/merge Document node
             safe_title = document_title.replace("'", "\\'")
-            await session.execute(text(
+            await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MERGE (d:Document {{doc_id: '{document_id}'}}) "
                 f"SET d.title = '{safe_title}' "
                 f"RETURN d "
                 f"$$) as (v agtype)"
-            ))
+            )
 
             # 2. Create/merge Entity nodes and MENTIONS edges
             for entity in entities:
@@ -82,7 +84,7 @@ class AGEGraphRepository:
                 safe_name = entity.text.replace("'", "\\'")
                 safe_label = entity.label.replace("'", "\\'")
 
-                await session.execute(text(
+                await self._cypher(session,
                     f"SELECT * FROM cypher('knowledge_graph', $$ "
                     f"MERGE (e:Entity {{normalized_name: '{safe_norm}', type: '{safe_label}'}}) "
                     f"SET e.name = '{safe_name}' "
@@ -93,7 +95,7 @@ class AGEGraphRepository:
                     f"    r.confidence = {entity.confidence} "
                     f"RETURN e "
                     f"$$) as (v agtype)"
-                ))
+                )
 
             # 3. Create CO_OCCURS edges for entities in the same chunk
             chunk_entity_map: dict[UUID, list[EntityExtraction]] = {}
@@ -108,7 +110,7 @@ class AGEGraphRepository:
                         safe_n2 = e2.normalized_name.replace("'", "\\'")
                         if safe_n1 == safe_n2:
                             continue
-                        await session.execute(text(
+                        await self._cypher(session,
                             f"SELECT * FROM cypher('knowledge_graph', $$ "
                             f"MATCH (a:Entity {{normalized_name: '{safe_n1}'}}), "
                             f"      (b:Entity {{normalized_name: '{safe_n2}'}}) "
@@ -116,7 +118,7 @@ class AGEGraphRepository:
                             f"SET r.count = coalesce(r.count, 0) + 1 "
                             f"RETURN r "
                             f"$$) as (v agtype)"
-                        ))
+                        )
 
             await session.commit()
             logger.info(
@@ -127,31 +129,26 @@ class AGEGraphRepository:
     async def get_related_entities(
         self, entity_id: UUID, hops: int = 2
     ) -> list[Entity]:
-        """Traverse CO_OCCURS edges to find related entities."""
-        # We need the normalized_name to query AGE — look it up from the entity_repo
-        # For now, this method takes entity_id but queries by normalized_name
-        # via a join approach. The caller should pass the entity's normalized_name.
-        # This is a limitation of the current design — see get_related_by_name.
+        """Traverse CO_OCCURS edges. Requires normalized_name — see get_related_by_name."""
         return []
 
     async def get_related_by_name(
         self, normalized_name: str, hops: int = 2, limit: int = 20
     ) -> list[dict]:
-        """Find entities related via CO_OCCURS edges, starting from a name."""
+        """Find entities related via CO_OCCURS edges."""
         safe_name = normalized_name.replace("'", "\\'")
-        hop_pattern = "-[:CO_OCCURS*1..{}]-".format(hops)
 
         async with self._session_factory() as session:
             await self._load_age(session)
-            result = await session.execute(text(
+            result = await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (start:Entity {{normalized_name: '{safe_name}'}}) "
-                f"{hop_pattern}(related:Entity) "
+                f"-[:CO_OCCURS*1..{hops}]-(related:Entity) "
                 f"WHERE related.normalized_name <> '{safe_name}' "
                 f"RETURN DISTINCT related.normalized_name, related.type, related.name "
                 f"LIMIT {int(limit)} "
                 f"$$) as (normalized_name agtype, type agtype, name agtype)"
-            ))
+            )
             rows = result.fetchall()
             return [
                 {
@@ -165,7 +162,7 @@ class AGEGraphRepository:
     async def get_entity_documents(
         self, entity_id: UUID
     ) -> list[tuple[UUID, str]]:
-        """Get documents that mention a given entity. Requires normalized_name lookup."""
+        """Get documents mentioning an entity. Requires normalized_name — see get_entity_documents_by_name."""
         return []
 
     async def get_entity_documents_by_name(
@@ -176,12 +173,12 @@ class AGEGraphRepository:
 
         async with self._session_factory() as session:
             await self._load_age(session)
-            result = await session.execute(text(
+            result = await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document)-[:MENTIONS]->(e:Entity {{normalized_name: '{safe_name}'}}) "
                 f"RETURN d.doc_id, d.title "
                 f"$$) as (doc_id agtype, title agtype)"
-            ))
+            )
             rows = result.fetchall()
             return [
                 {
@@ -197,16 +194,16 @@ class AGEGraphRepository:
         """Get entities mentioned in a document from the graph."""
         async with self._session_factory() as session:
             await self._load_age(session)
-            result = await session.execute(text(
+            result = await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document {{doc_id: '{document_id}'}})-[:MENTIONS]->(e:Entity) "
                 f"RETURN e.normalized_name, e.type, e.name "
                 f"$$) as (normalized_name agtype, type agtype, name agtype)"
-            ))
+            )
             rows = result.fetchall()
             return [
                 Entity(
-                    id=uuid4(),  # Graph doesn't store UUIDs; these are ephemeral
+                    id=uuid4(),
                     name=_unquote_agtype(row[2]),
                     entity_type=_unquote_agtype(row[1]),
                     normalized_name=_unquote_agtype(row[0]),
@@ -218,17 +215,17 @@ class AGEGraphRepository:
         """Remove a document node and its MENTIONS edges from the graph."""
         async with self._session_factory() as session:
             await self._load_age(session)
-            await session.execute(text(
+            await self._cypher(session,
                 f"SELECT * FROM cypher('knowledge_graph', $$ "
                 f"MATCH (d:Document {{doc_id: '{document_id}'}}) "
                 f"DETACH DELETE d "
                 f"$$) as (v agtype)"
-            ))
+            )
             await session.commit()
 
 
 def _unquote_agtype(val) -> str:
-    """AGE returns agtype values as JSON-encoded strings. Strip the quotes."""
+    """AGE returns agtype values as JSON-encoded strings."""
     s = str(val)
     if s.startswith('"') and s.endswith('"'):
         return s[1:-1]
