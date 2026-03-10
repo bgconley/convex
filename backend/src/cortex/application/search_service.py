@@ -6,7 +6,7 @@ import time
 from uuid import UUID
 
 from cortex.domain.chunk import ScoredChunk
-from cortex.domain.ports import ChunkRepository, DocumentRepository, EmbedderPort
+from cortex.domain.ports import ChunkRepository, DocumentRepository, EmbedderPort, RerankerPort
 
 
 class SearchService:
@@ -29,22 +29,26 @@ class SearchService:
         embedder: EmbedderPort,
         chunk_repo: ChunkRepository,
         doc_repo: DocumentRepository,
+        reranker: RerankerPort | None = None,
     ) -> None:
         self._embedder = embedder
         self._chunk_repo = chunk_repo
         self._doc_repo = doc_repo
+        self._reranker = reranker
 
     async def search(
         self,
         query: str,
         top_k: int = 10,
         file_type: str | None = None,
+        rerank: bool = True,
     ) -> SearchResponse:
-        """Hybrid search: vector + BM25 with Reciprocal Rank Fusion.
+        """Hybrid search: vector + BM25 with RRF, then neural reranking.
 
         1. Run vector search and BM25 search concurrently
-        2. Compute RRF scores to merge and rank
-        3. Enrich top candidates with document metadata
+        2. Compute RRF scores to merge and rank (top 50)
+        3. Rerank top candidates with mxbai-rerank-large-v2 (if available)
+        4. Enrich with document metadata
         """
         start = time.monotonic()
 
@@ -57,7 +61,20 @@ class SearchService:
         # 2. RRF fusion
         fused = self._rrf_fusion(vec_results, bm25_results)
 
-        # 3. Enrich with document metadata
+        # 3. Neural reranking (optional)
+        rerank_scores: dict[UUID, float] = {}
+        if rerank and self._reranker and fused:
+            rerank_scores = await self._rerank_candidates(query, fused, top_k)
+
+        # 4. If reranked, reorder by rerank score; otherwise keep RRF order
+        if rerank_scores:
+            # Reranked candidates get rerank score as primary; unreranked drop to the end
+            fused.sort(
+                key=lambda c: rerank_scores.get(c.chunk_id, -1.0),
+                reverse=True,
+            )
+
+        # 5. Enrich with document metadata
         results: list[SearchResultItem] = []
         seen_chunks: set[UUID] = set()
 
@@ -76,6 +93,9 @@ class SearchService:
             snippet = self._highlight_snippet(candidate.chunk_text, query)
             anchor_id = f"chunk-{candidate.chunk_index}"
 
+            rerank_score = rerank_scores.get(candidate.chunk_id)
+            final_score = rerank_score if rerank_score is not None else candidate.score
+
             results.append(
                 SearchResultItem(
                     chunk_id=candidate.chunk_id,
@@ -86,9 +106,10 @@ class SearchService:
                     highlighted_snippet=snippet,
                     section_heading=candidate.section_heading,
                     page_number=candidate.page_number,
-                    score=candidate.score,
+                    score=final_score,
                     vector_score=candidate.vector_score,
                     bm25_score=candidate.bm25_score,
+                    rerank_score=rerank_score,
                     chunk_start_char=candidate.start_char,
                     chunk_end_char=candidate.end_char,
                     anchor_id=anchor_id,
@@ -106,6 +127,22 @@ class SearchService:
             total_candidates=len(fused),
             search_time_ms=elapsed_ms,
         )
+
+    async def _rerank_candidates(
+        self, query: str, fused: list[FusedChunk], top_k: int
+    ) -> dict[UUID, float]:
+        """Rerank fused candidates using the neural reranker.
+
+        Returns a mapping of chunk_id → rerank_score for reranked candidates.
+        """
+        documents = [c.chunk_text for c in fused]
+        rerank_results = await self._reranker.rerank(query, documents, top_k=top_k)
+
+        scores: dict[UUID, float] = {}
+        for rr in rerank_results:
+            if rr.index < len(fused):
+                scores[fused[rr.index].chunk_id] = rr.score
+        return scores
 
     async def bm25_search(
         self,
@@ -336,7 +373,7 @@ class SearchResultItem:
     __slots__ = (
         "chunk_id", "document_id", "document_title", "document_type",
         "chunk_text", "highlighted_snippet", "section_heading",
-        "page_number", "score", "vector_score", "bm25_score",
+        "page_number", "score", "vector_score", "bm25_score", "rerank_score",
         "chunk_start_char", "chunk_end_char", "anchor_id",
     )
 

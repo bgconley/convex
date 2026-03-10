@@ -54,6 +54,29 @@ class FakeChunkRepo:
         return self._bm25_chunks[:top_k]
 
 
+class FakeReranker:
+    """Reranker test double — returns scores in reverse order of input to verify reordering."""
+
+    def __init__(self, scores: list[float] | None = None):
+        self._scores = scores
+        self.called = False
+
+    async def rerank(self, query: str, documents: list[str], top_k: int) -> list[RerankResult]:
+        self.called = True
+        if self._scores:
+            return [
+                RerankResult(index=i, score=s, text=documents[i])
+                for i, s in enumerate(self._scores[:top_k])
+                if i < len(documents)
+            ]
+        # Default: score inversely by position (last input scores highest)
+        n = min(len(documents), top_k)
+        return [
+            RerankResult(index=i, score=float(n - i), text=documents[i])
+            for i in range(n)
+        ]
+
+
 class FakeDocRepo:
     def __init__(self, docs: dict[UUID, Document] | None = None):
         self._docs = docs or {}
@@ -309,6 +332,108 @@ class TestHybridSearch:
         assert len(response.results) == 1
         assert response.results[0].vector_score == 0.9
         assert response.results[0].bm25_score is None
+
+
+class TestReranking:
+    """Tests for neural reranking integration in SearchService.search."""
+
+    @pytest.mark.asyncio
+    async def test_reranker_is_called_when_provided(self):
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test content", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        reranker = FakeReranker(scores=[7.5])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, reranker=reranker,
+        )
+        response = await service.search("test")
+
+        assert reranker.called
+        assert len(response.results) == 1
+        assert response.results[0].rerank_score == 7.5
+        assert response.results[0].score == 7.5  # rerank score becomes primary
+
+    @pytest.mark.asyncio
+    async def test_reranker_reorders_results(self):
+        doc_id = uuid4()
+        id_a = uuid4()
+        id_b = uuid4()
+        chunk_a = _make_scored_chunk(doc_id, chunk_id=id_a, text="A", score=0.9, chunk_index=0)
+        chunk_b = _make_scored_chunk(doc_id, chunk_id=id_b, text="B", score=0.8, chunk_index=1)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk_a, chunk_b], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        # Reranker scores B higher than A
+        reranker = FakeReranker(scores=[3.0, 8.0])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, reranker=reranker,
+        )
+        response = await service.search("test", top_k=10)
+
+        assert len(response.results) == 2
+        # B should be first after reranking
+        assert response.results[0].chunk_id == id_b
+        assert response.results[0].rerank_score == 8.0
+        assert response.results[1].chunk_id == id_a
+        assert response.results[1].rerank_score == 3.0
+
+    @pytest.mark.asyncio
+    async def test_reranker_skipped_when_flag_false(self):
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        reranker = FakeReranker()
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, reranker=reranker,
+        )
+        response = await service.search("test", rerank=False)
+
+        assert not reranker.called
+        assert response.results[0].rerank_score is None
+
+    @pytest.mark.asyncio
+    async def test_reranker_skipped_when_none(self):
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, reranker=None,
+        )
+        response = await service.search("test")
+
+        assert response.results[0].rerank_score is None
+
+    @pytest.mark.asyncio
+    async def test_score_breakdown_includes_rerank(self):
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=0.85)
+        bm25_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=1.1)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[bm25_chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        reranker = FakeReranker(scores=[6.5])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, reranker=reranker,
+        )
+        response = await service.search("test")
+
+        result = response.results[0]
+        assert result.vector_score == 0.85
+        assert result.bm25_score == 1.1
+        assert result.rerank_score == 6.5
+        assert result.score == 6.5  # rerank score is the final score
 
 
 class TestHighlightSnippet:

@@ -19,6 +19,7 @@ async def search(body: SearchRequest, request: Request):
         query=body.query,
         top_k=body.top_k,
         file_type=body.filters.file_types[0] if body.filters and body.filters.file_types else None,
+        rerank=body.rerank,
     )
 
     return SearchResponse(
@@ -37,6 +38,7 @@ async def search(body: SearchRequest, request: Request):
                 score_breakdown=ScoreBreakdown(
                     vector_score=r.vector_score,
                     bm25_score=r.bm25_score,
+                    rerank_score=r.rerank_score,
                 ),
                 chunk_start_char=r.chunk_start_char,
                 chunk_end_char=r.chunk_end_char,
