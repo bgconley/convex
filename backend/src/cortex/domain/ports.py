@@ -99,7 +99,7 @@ class EntityRepository(Protocol):
 
 
 class GraphPort(Protocol):
-    """Knowledge graph operations."""
+    """Knowledge graph operations via Apache AGE."""
 
     async def add_document_entities(
         self,
@@ -110,6 +110,12 @@ class GraphPort(Protocol):
     ) -> None: ...
     async def get_related_entities(
         self, entity_id: UUID, hops: int = 2
+    ) -> list[Entity]: ...
+    async def get_entity_documents(
+        self, entity_id: UUID
+    ) -> list[tuple[UUID, str]]: ...
+    async def get_document_entities(
+        self, document_id: UUID
     ) -> list[Entity]: ...
     async def delete_document(self, document_id: UUID) -> None: ...
 

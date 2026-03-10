@@ -13,6 +13,7 @@ from cortex.domain.ports import (
     EmbedderPort,
     EntityRepository,
     FileStoragePort,
+    GraphPort,
     NERPort,
     ParserPort,
 )
@@ -39,6 +40,7 @@ class IngestionService:
         file_storage: FileStoragePort,
         ner: NERPort | None = None,
         entity_repo: EntityRepository | None = None,
+        graph_repo: GraphPort | None = None,
     ) -> None:
         self._parser = parser
         self._chunker = chunker
@@ -48,6 +50,7 @@ class IngestionService:
         self._file_storage = file_storage
         self._ner = ner
         self._entity_repo = entity_repo
+        self._graph_repo = graph_repo
 
     async def ingest(self, document_id: UUID) -> None:
         """Run the full ingestion pipeline for a document.
@@ -58,6 +61,8 @@ class IngestionService:
         doc = await self._doc_repo.get(document_id)
         if doc is None:
             raise ValueError(f"Document {document_id} not found")
+
+        extractions: list = []  # populated by NER step, used by graph step
 
         try:
             # 1. Parse
@@ -148,7 +153,23 @@ class IngestionService:
                 )
                 logger.info("Extracted %d entities", len(extractions))
 
-            # 6. Done (graph step added in Step 3.2)
+            # 6. Knowledge graph — add document + entities to AGE graph
+            if self._graph_repo and extractions:
+                await self._doc_repo.update_status(
+                    document_id, ProcessingStatus.BUILDING_GRAPH.value
+                )
+                logger.info("Building knowledge graph for document %s", document_id)
+
+                await self._graph_repo.add_document_entities(
+                    document_id=document_id,
+                    document_title=doc.title,
+                    entities=extractions,
+                    chunk_ids=[c.id for c in chunks],
+                )
+
+                logger.info("Knowledge graph updated for document %s", document_id)
+
+            # 7. Done
             await self._doc_repo.update_status(document_id, ProcessingStatus.READY.value)
             logger.info("Ingestion complete for document %s", document_id)
 
