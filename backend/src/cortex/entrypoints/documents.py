@@ -120,9 +120,9 @@ async def get_document_content(
             metadata=_doc_to_response(doc),
         )
 
-    # Structured view
+    # Structured view — inject chunk anchors for search-hit navigation
     if doc.rendered_html:
-        content = doc.rendered_html
+        content = await _inject_chunk_anchors(doc.rendered_html, document_id, request)
         fmt = "html"
     elif doc.rendered_markdown:
         content = doc.rendered_markdown
@@ -138,6 +138,41 @@ async def get_document_content(
         original_url=original_url,
         metadata=_doc_to_response(doc),
     )
+
+
+async def _inject_chunk_anchors(
+    html: str, document_id: UUID, request: Request
+) -> str:
+    """Inject <span id="chunk-N"> anchors into rendered HTML at chunk boundaries.
+
+    This enables search-hit navigation: the frontend scrolls to #chunk-N
+    when the user clicks a search result.
+    """
+    chunk_repo = request.app.state.chunk_repo
+    chunks = await chunk_repo.get_by_document(document_id)
+    if not chunks:
+        return html
+
+    # Insert anchors at the beginning of each chunk's approximate position
+    # We use the chunk's section heading as a landmark to find insertion points
+    for chunk in sorted(chunks, key=lambda c: c.chunk_index, reverse=True):
+        anchor = f'<span id="chunk-{chunk.chunk_index}"></span>'
+        # Find the chunk's text start in the HTML (best effort — HTML structure
+        # may differ from plain text offsets)
+        first_words = chunk.chunk_text[:40].strip()
+        if first_words:
+            # Escape for HTML search and find first occurrence
+            import html as html_module
+
+            search_text = html_module.escape(first_words[:20])
+            pos = html.find(search_text)
+            if pos >= 0:
+                html = html[:pos] + anchor + html[pos:]
+            else:
+                # Fallback: prepend anchor to the HTML
+                html = anchor + html
+
+    return html
 
 
 @router.get("/{document_id}/original")

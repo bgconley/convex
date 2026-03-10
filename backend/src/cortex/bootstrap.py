@@ -1,5 +1,6 @@
 from cortex.application.document_service import DocumentService
 from cortex.application.ingestion_service import IngestionService
+from cortex.application.search_service import SearchService
 from cortex.infrastructure.file_storage import LocalFileStorage
 from cortex.infrastructure.ml.chonkie_chunker import ChonkieChunker
 from cortex.infrastructure.ml.docling_parser import DoclingParser
@@ -49,4 +50,8 @@ class CompositionRoot:
             file_storage=self.file_storage,
         )
 
-        # TODO(Step 1.8): search_service
+        self.search_service = SearchService(
+            embedder=self.embedder,
+            chunk_repo=self.chunk_repo,
+            doc_repo=self.doc_repo,
+        )
