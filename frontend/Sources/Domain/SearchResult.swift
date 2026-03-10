@@ -24,11 +24,29 @@ package struct SearchFilters: Sendable, Codable {
     package var fileTypes: [String]?
     package var collectionIds: [UUID]?
     package var tags: [String]?
+    package var dateFrom: Date?
+    package var dateTo: Date?
+
+    package init(
+        fileTypes: [String]? = nil,
+        collectionIds: [UUID]? = nil,
+        tags: [String]? = nil,
+        dateFrom: Date? = nil,
+        dateTo: Date? = nil
+    ) {
+        self.fileTypes = fileTypes
+        self.collectionIds = collectionIds
+        self.tags = tags
+        self.dateFrom = dateFrom
+        self.dateTo = dateTo
+    }
 
     enum CodingKeys: String, CodingKey {
         case tags
         case fileTypes = "file_types"
         case collectionIds = "collection_ids"
+        case dateFrom = "date_from"
+        case dateTo = "date_to"
     }
 }
 
@@ -97,5 +115,53 @@ package struct ScoreBreakdown: Sendable, Codable, Equatable {
         case bm25Score = "bm25_score"
         case graphScore = "graph_score"
         case rerankScore = "rerank_score"
+    }
+}
+
+package struct DocumentSearchResponse: Sendable, Codable {
+    package let query: String
+    package let results: [DocumentSearchResultItem]
+    package let totalDocuments: Int
+    package let searchTimeMs: Double
+
+    package init(query: String, results: [DocumentSearchResultItem], totalDocuments: Int, searchTimeMs: Double) {
+        self.query = query
+        self.results = results
+        self.totalDocuments = totalDocuments
+        self.searchTimeMs = searchTimeMs
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case query, results
+        case totalDocuments = "total_documents"
+        case searchTimeMs = "search_time_ms"
+    }
+}
+
+package struct DocumentSearchResultItem: Sendable, Codable, Identifiable {
+    package let documentId: UUID
+    package let documentTitle: String
+    package let documentType: String
+    package let score: Double
+    package let scoreBreakdown: ScoreBreakdown
+    package let bestChunkSnippet: String
+    package let bestChunkSection: String?
+    package let bestChunkPage: Int?
+    package let bestChunkAnchorId: String?
+    package let chunkCount: Int
+
+    package var id: UUID { documentId }
+
+    enum CodingKeys: String, CodingKey {
+        case score
+        case documentId = "document_id"
+        case documentTitle = "document_title"
+        case documentType = "document_type"
+        case scoreBreakdown = "score_breakdown"
+        case bestChunkSnippet = "best_chunk_snippet"
+        case bestChunkSection = "best_chunk_section"
+        case bestChunkPage = "best_chunk_page"
+        case bestChunkAnchorId = "best_chunk_anchor_id"
+        case chunkCount = "chunk_count"
     }
 }

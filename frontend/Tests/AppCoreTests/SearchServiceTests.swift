@@ -16,6 +16,16 @@ final class FakeSearchRepo: SearchPort, @unchecked Sendable {
             searchTimeMs: 1.0
         )
     }
+
+    func searchDocuments(request: SearchRequest) async throws -> DocumentSearchResponse {
+        lastRequest = request
+        return DocumentSearchResponse(
+            query: request.query,
+            results: [],
+            totalDocuments: 0,
+            searchTimeMs: 1.0
+        )
+    }
 }
 
 final class SearchServiceTests: XCTestCase {

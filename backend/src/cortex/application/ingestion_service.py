@@ -11,7 +11,9 @@ from cortex.domain.ports import (
     ChunkerPort,
     DocumentRepository,
     EmbedderPort,
+    EntityRepository,
     FileStoragePort,
+    NERPort,
     ParserPort,
 )
 
@@ -35,6 +37,8 @@ class IngestionService:
         doc_repo: DocumentRepository,
         chunk_repo: ChunkRepository,
         file_storage: FileStoragePort,
+        ner: NERPort | None = None,
+        entity_repo: EntityRepository | None = None,
     ) -> None:
         self._parser = parser
         self._chunker = chunker
@@ -42,6 +46,8 @@ class IngestionService:
         self._doc_repo = doc_repo
         self._chunk_repo = chunk_repo
         self._file_storage = file_storage
+        self._ner = ner
+        self._entity_repo = entity_repo
 
     async def ingest(self, document_id: UUID) -> None:
         """Run the full ingestion pipeline for a document.
@@ -126,7 +132,23 @@ class IngestionService:
             # 4. Store chunks with embeddings
             await self._chunk_repo.save_chunks(chunks)
 
-            # 5. Done (NER + graph added in Phase 3)
+            # 5. NER — extract named entities from chunks
+            if self._ner and self._entity_repo:
+                await self._doc_repo.update_status(
+                    document_id, ProcessingStatus.EXTRACTING_ENTITIES.value
+                )
+                logger.info("Extracting entities from %d chunks", len(chunks))
+
+                extractions = await self._ner.extract_entities(chunks, threshold=0.4)
+                chunk_ids = [c.id for c in chunks]
+                await self._entity_repo.upsert_entities(document_id, extractions, chunk_ids)
+
+                await self._doc_repo.update_status(
+                    document_id, ProcessingStatus.ENTITIES_EXTRACTED.value
+                )
+                logger.info("Extracted %d entities", len(extractions))
+
+            # 6. Done (graph step added in Step 3.2)
             await self._doc_repo.update_status(document_id, ProcessingStatus.READY.value)
             logger.info("Ingestion complete for document %s", document_id)
 

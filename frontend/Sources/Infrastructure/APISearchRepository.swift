@@ -11,4 +11,8 @@ package struct APISearchRepository: SearchPort, Sendable {
     package func search(request: SearchRequest) async throws -> SearchResponse {
         try await client.post("search", body: request)
     }
+
+    package func searchDocuments(request: SearchRequest) async throws -> DocumentSearchResponse {
+        try await client.post("search/documents", body: request)
+    }
 }

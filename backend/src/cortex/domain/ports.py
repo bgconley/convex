@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Protocol
 from uuid import UUID
 
-from cortex.domain.chunk import Chunk, ChunkResult, ScoredChunk
+from cortex.domain.chunk import Chunk, ChunkResult, ScoredChunk  # noqa: F401
 from cortex.domain.document import Document, ParseResult
 from cortex.domain.entity import Entity, EntityExtraction, RerankResult
 
@@ -41,8 +41,8 @@ class RerankerPort(Protocol):
 class NERPort(Protocol):
     """Extracts named entities from text."""
 
-    def extract_entities(
-        self, chunks: list[ChunkResult], threshold: float = 0.4
+    async def extract_entities(
+        self, chunks: list[Chunk], threshold: float = 0.4
     ) -> list[EntityExtraction]: ...
 
 
@@ -79,6 +79,23 @@ class ChunkRepository(Protocol):
     async def bm25_search(
         self, query: str, top_k: int = 50
     ) -> list[ScoredChunk]: ...
+
+
+class EntityRepository(Protocol):
+    """Persists and retrieves entities and their mentions."""
+
+    async def upsert_entities(
+        self,
+        document_id: UUID,
+        extractions: list[EntityExtraction],
+        chunk_ids: list[UUID],
+    ) -> list[Entity]: ...
+    async def get_by_document(self, document_id: UUID) -> list[Entity]: ...
+    async def list_all(
+        self, entity_type: str | None = None, limit: int = 100, offset: int = 0
+    ) -> list[Entity]: ...
+    async def get(self, entity_id: UUID) -> Entity | None: ...
+    async def delete_by_document(self, document_id: UUID) -> None: ...
 
 
 class GraphPort(Protocol):

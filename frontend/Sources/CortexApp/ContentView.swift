@@ -86,6 +86,11 @@ struct ContentView: View {
                             searchHitPageNumber = item.pageNumber
                             selectedDocumentId = item.documentId
                         },
+                        onSelectDocument: { item in
+                            searchHitAnchorId = item.bestChunkAnchorId
+                            searchHitPageNumber = item.bestChunkPage
+                            selectedDocumentId = item.documentId
+                        },
                         onDismiss: {
                             showSearchOverlay = false
                         }

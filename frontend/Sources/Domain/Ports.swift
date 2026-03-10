@@ -33,6 +33,7 @@ package protocol DocumentRepositoryPort: Sendable {
 
 package protocol SearchPort: Sendable {
     func search(request: SearchRequest) async throws -> SearchResponse
+    func searchDocuments(request: SearchRequest) async throws -> DocumentSearchResponse
 }
 
 package struct HealthStatus: Sendable, Codable {

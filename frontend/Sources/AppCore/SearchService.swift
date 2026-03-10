@@ -14,6 +14,33 @@ package actor SearchService {
         return try await searchRepo.search(request: request)
     }
 
+    package func searchDocuments(query: String, topK: Int = 10, filters: SearchFilters? = nil) async throws -> DocumentSearchResponse {
+        let request = SearchRequest(query: query, topK: topK, filters: filters)
+        return try await searchRepo.searchDocuments(request: request)
+    }
+
+    package func debouncedSearchDocuments(
+        query: String,
+        topK: Int = 10,
+        filters: SearchFilters? = nil,
+        delayMs: UInt64 = 300,
+        onResult: @Sendable @escaping (Result<DocumentSearchResponse, Error>) -> Void
+    ) {
+        debounceTask?.cancel()
+        debounceTask = Task {
+            do {
+                try await Task.sleep(nanoseconds: delayMs * 1_000_000)
+                guard !Task.isCancelled else { return }
+                let result = try await searchDocuments(query: query, topK: topK, filters: filters)
+                onResult(.success(result))
+            } catch is CancellationError {
+                // Debounce cancelled — expected
+            } catch {
+                onResult(.failure(error))
+            }
+        }
+    }
+
     package func cancelPendingSearch() {
         debounceTask?.cancel()
         debounceTask = nil
@@ -23,6 +50,7 @@ package actor SearchService {
     package func debouncedSearch(
         query: String,
         topK: Int = 10,
+        filters: SearchFilters? = nil,
         delayMs: UInt64 = 300,
         onResult: @Sendable @escaping (Result<SearchResponse, Error>) -> Void
     ) {
@@ -31,7 +59,7 @@ package actor SearchService {
             do {
                 try await Task.sleep(nanoseconds: delayMs * 1_000_000)
                 guard !Task.isCancelled else { return }
-                let result = try await search(query: query, topK: topK)
+                let result = try await search(query: query, topK: topK, filters: filters)
                 onResult(.success(result))
             } catch is CancellationError {
                 // Debounce cancelled — expected

@@ -4,9 +4,11 @@ from cortex.application.search_service import SearchService
 from cortex.infrastructure.file_storage import LocalFileStorage
 from cortex.infrastructure.ml.chonkie_chunker import ChonkieChunker
 from cortex.infrastructure.ml.docling_parser import DoclingParser
+from cortex.infrastructure.ml.gliner_ner import GlinerNER
 from cortex.infrastructure.ml.mxbai_reranker import MxbaiReranker
 from cortex.infrastructure.ml.tei_embedder import TEIEmbedder
 from cortex.infrastructure.persistence.chunk_repo import PGChunkRepository
+from cortex.infrastructure.persistence.entity_repo import PGEntityRepository
 from cortex.infrastructure.persistence.database import create_session_factory
 from cortex.infrastructure.persistence.document_repo import PGDocumentRepository
 from cortex.settings import Settings
@@ -37,6 +39,8 @@ class CompositionRoot:
             model=settings.embedding_model,
         )
         self.reranker = MxbaiReranker(base_url=settings.reranker_url)
+        self.ner = GlinerNER(base_url=settings.ner_url)
+        self.entity_repo = PGEntityRepository(self.session_factory)
 
         # Application services (depend on ports, not concrete types)
         self.document_service = DocumentService(
@@ -50,6 +54,8 @@ class CompositionRoot:
             doc_repo=self.doc_repo,
             chunk_repo=self.chunk_repo,
             file_storage=self.file_storage,
+            ner=self.ner,
+            entity_repo=self.entity_repo,
         )
 
         self.search_service = SearchService(
