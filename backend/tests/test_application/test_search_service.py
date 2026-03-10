@@ -436,6 +436,75 @@ class TestReranking:
         assert result.score == 6.5  # rerank score is the final score
 
 
+class TestDocumentSearch:
+    """Tests for SearchService.document_search — document-level aggregation."""
+
+    @pytest.mark.asyncio
+    async def test_aggregates_chunks_by_document(self):
+        doc_a = uuid4()
+        doc_b = uuid4()
+        # Doc A has 2 chunks, Doc B has 1 chunk
+        chunks_vec = [
+            _make_scored_chunk(doc_a, text="A chunk 1", score=0.9, chunk_index=0),
+            _make_scored_chunk(doc_a, text="A chunk 2", score=0.7, chunk_index=1),
+            _make_scored_chunk(doc_b, text="B chunk 1", score=0.8, chunk_index=0),
+        ]
+        chunk_repo = FakeChunkRepo(vec_chunks=chunks_vec, bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_a: _make_doc(doc_a), doc_b: _make_doc(doc_b)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.document_search("test", top_k=10, rerank=False)
+
+        assert response.total_documents == 2
+        assert len(response.results) == 2
+
+    @pytest.mark.asyncio
+    async def test_uses_max_score_per_document(self):
+        doc_id = uuid4()
+        chunks_vec = [
+            _make_scored_chunk(doc_id, text="high score chunk", score=0.95, chunk_index=0),
+            _make_scored_chunk(doc_id, text="low score chunk", score=0.5, chunk_index=1),
+        ]
+        chunk_repo = FakeChunkRepo(vec_chunks=chunks_vec, bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.document_search("test", rerank=False)
+
+        assert len(response.results) == 1
+        # Score should be from the highest-scoring chunk
+        assert response.results[0].chunk_count == 2
+
+    @pytest.mark.asyncio
+    async def test_includes_best_chunk_snippet(self):
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="the best matching text here", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.document_search("matching", rerank=False)
+
+        assert len(response.results) == 1
+        assert "matching" in response.results[0].best_chunk_snippet.lower() or "<mark>" in response.results[0].best_chunk_snippet
+
+    @pytest.mark.asyncio
+    async def test_respects_top_k(self):
+        docs = {}
+        chunks = []
+        for i in range(5):
+            did = uuid4()
+            docs[did] = _make_doc(did)
+            chunks.append(_make_scored_chunk(did, text=f"doc {i}", score=0.9 - i * 0.1, chunk_index=0))
+        chunk_repo = FakeChunkRepo(vec_chunks=chunks, bm25_chunks=[])
+        doc_repo = FakeDocRepo(docs)
+
+        service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
+        response = await service.document_search("doc", top_k=3, rerank=False)
+
+        assert len(response.results) == 3
+
+
 class TestHighlightSnippet:
     def test_highlights_query_terms(self):
         snippet = SearchService._highlight_snippet(

@@ -205,6 +205,62 @@ class SearchService:
             search_time_ms=elapsed_ms,
         )
 
+    async def document_search(
+        self,
+        query: str,
+        top_k: int = 10,
+        file_type: str | None = None,
+        rerank: bool = True,
+    ) -> DocumentSearchResponse:
+        """Document-level search: aggregate chunk scores per document.
+
+        Runs the full hybrid search pipeline (vector + BM25 + RRF + rerank),
+        then groups results by document_id. Each document's score is the max
+        chunk score, and the top-scoring chunk provides the snippet.
+        """
+        start = time.monotonic()
+
+        # Run chunk-level search with a higher top_k to get good coverage
+        chunk_response = await self.search(
+            query=query, top_k=50, file_type=file_type, rerank=rerank,
+        )
+
+        # Aggregate by document
+        doc_groups: dict[UUID, list[SearchResultItem]] = {}
+        for result in chunk_response.results:
+            doc_groups.setdefault(result.document_id, []).append(result)
+
+        # Build document-level results: max score, best chunk as snippet
+        doc_results: list[DocumentSearchResult] = []
+        for doc_id, chunks in doc_groups.items():
+            best = max(chunks, key=lambda c: c.score)
+            doc_results.append(DocumentSearchResult(
+                document_id=doc_id,
+                document_title=best.document_title,
+                document_type=best.document_type,
+                score=best.score,
+                vector_score=best.vector_score,
+                bm25_score=best.bm25_score,
+                rerank_score=best.rerank_score,
+                best_chunk_snippet=best.highlighted_snippet,
+                best_chunk_section=best.section_heading,
+                best_chunk_page=best.page_number,
+                best_chunk_anchor_id=best.anchor_id,
+                chunk_count=len(chunks),
+            ))
+
+        doc_results.sort(key=lambda d: d.score, reverse=True)
+        doc_results = doc_results[:top_k]
+
+        elapsed_ms = (time.monotonic() - start) * 1000
+
+        return DocumentSearchResponse(
+            query=query,
+            results=doc_results,
+            total_documents=len(doc_groups),
+            search_time_ms=elapsed_ms,
+        )
+
     # -- Internal methods --
 
     async def _vector_search(self, query: str, top_k: int = 50) -> list[ScoredChunk]:
@@ -390,4 +446,28 @@ class SearchResponse:
         self.query = query
         self.results = results
         self.total_candidates = total_candidates
+        self.search_time_ms = search_time_ms
+
+
+class DocumentSearchResult:
+    __slots__ = (
+        "document_id", "document_title", "document_type",
+        "score", "vector_score", "bm25_score", "rerank_score",
+        "best_chunk_snippet", "best_chunk_section", "best_chunk_page",
+        "best_chunk_anchor_id", "chunk_count",
+    )
+
+    def __init__(self, **kwargs):
+        for k, v in kwargs.items():
+            setattr(self, k, v)
+
+
+class DocumentSearchResponse:
+    __slots__ = ("query", "results", "total_documents", "search_time_ms")
+
+    def __init__(self, query: str, results: list[DocumentSearchResult],
+                 total_documents: int, search_time_ms: float):
+        self.query = query
+        self.results = results
+        self.total_documents = total_documents
         self.search_time_ms = search_time_ms

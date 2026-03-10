@@ -58,3 +58,23 @@ class SearchResponse(BaseModel):
     results: list[SearchResultResponse]
     total_candidates: int
     search_time_ms: float
+
+
+class DocumentSearchResultResponse(BaseModel):
+    document_id: UUID
+    document_title: str
+    document_type: str
+    score: float
+    score_breakdown: ScoreBreakdown
+    best_chunk_snippet: str
+    best_chunk_section: str | None = None
+    best_chunk_page: int | None = None
+    best_chunk_anchor_id: str | None = None
+    chunk_count: int
+
+
+class DocumentSearchResponse(BaseModel):
+    query: str
+    results: list[DocumentSearchResultResponse]
+    total_documents: int
+    search_time_ms: float
