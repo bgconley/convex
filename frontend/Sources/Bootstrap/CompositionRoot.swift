@@ -12,6 +12,9 @@ package struct CompositionRoot: Sendable {
     package let searchService: SearchService
     package let ingestionService: IngestionService
     package let healthRepo: any HealthPort
+    package let apiClient: APIClient
+    package let markdownRenderer: MarkdownRenderer
+    package let thumbnailLoader: ThumbnailLoader
     package let webSocketClient: WebSocketClient
     package let settings: Settings
 
@@ -27,6 +30,9 @@ package struct CompositionRoot: Sendable {
         self.searchService = SearchService(searchRepo: searchRepo)
         self.ingestionService = IngestionService(docRepo: docRepo)
         self.healthRepo = healthRepo
+        self.apiClient = apiClient
+        self.markdownRenderer = MarkdownRenderer()
+        self.thumbnailLoader = ThumbnailLoader(baseURL: settings.backendURL)
         self.webSocketClient = WebSocketClient(baseURL: settings.backendURL)
     }
 }

@@ -33,14 +33,14 @@ package actor APIClient: Sendable {
     }
 
     package func get<T: Decodable>(_ path: String) async throws -> T {
-        let url = baseURL.appendingPathComponent(path)
+        let url = buildURL(path)
         let (data, response) = try await session.data(from: url)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)
     }
 
     package func post<T: Decodable>(_ path: String, body: some Encodable) async throws -> T {
-        let url = baseURL.appendingPathComponent(path)
+        let url = buildURL(path)
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -51,7 +51,7 @@ package actor APIClient: Sendable {
     }
 
     package func uploadMultipart<T: Decodable>(_ path: String, fileURL: URL) async throws -> T {
-        let url = baseURL.appendingPathComponent(path)
+        let url = buildURL(path)
         let boundary = UUID().uuidString
 
         var request = URLRequest(url: url)
@@ -74,8 +74,19 @@ package actor APIClient: Sendable {
         return try decoder.decode(T.self, from: data)
     }
 
+    package func getData(_ path: String) async throws -> Data {
+        let url = buildURL(path)
+        let (data, response) = try await session.data(from: url)
+        try validateResponse(response)
+        return data
+    }
+
+    package func url(for path: String) -> URL {
+        buildURL(path)
+    }
+
     package func delete(_ path: String) async throws {
-        let url = baseURL.appendingPathComponent(path)
+        let url = buildURL(path)
         var request = URLRequest(url: url)
         request.httpMethod = "DELETE"
         let (_, response) = try await session.data(for: request)
@@ -83,7 +94,7 @@ package actor APIClient: Sendable {
     }
 
     package func patch<T: Decodable>(_ path: String, body: some Encodable) async throws -> T {
-        let url = baseURL.appendingPathComponent(path)
+        let url = buildURL(path)
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -91,6 +102,16 @@ package actor APIClient: Sendable {
         let (data, response) = try await session.data(for: request)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)
+    }
+
+    /// Builds a URL from the base URL and a path that may contain query parameters.
+    /// `appendingPathComponent` percent-encodes `?` and `=`, so we use string
+    /// concatenation and `URL(string:)` instead.
+    private func buildURL(_ path: String) -> URL {
+        let base = baseURL.absoluteString.hasSuffix("/")
+            ? baseURL.absoluteString
+            : baseURL.absoluteString + "/"
+        return URL(string: base + path) ?? baseURL.appendingPathComponent(path)
     }
 
     private func validateResponse(_ response: URLResponse) throws {

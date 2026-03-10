@@ -14,6 +14,11 @@ package actor SearchService {
         return try await searchRepo.search(request: request)
     }
 
+    package func cancelPendingSearch() {
+        debounceTask?.cancel()
+        debounceTask = nil
+    }
+
     /// Debounced search — cancels previous pending search and waits before executing.
     package func debouncedSearch(
         query: String,

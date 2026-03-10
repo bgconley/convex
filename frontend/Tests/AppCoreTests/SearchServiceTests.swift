@@ -26,4 +26,19 @@ final class SearchServiceTests: XCTestCase {
         XCTAssertEqual(response.query, "test query")
         XCTAssertTrue(response.results.isEmpty)
     }
+
+    func testCancelPendingSearchPreventsExecution() async throws {
+        let fakeRepo = FakeSearchRepo()
+        let service = SearchService(searchRepo: fakeRepo)
+        let expectation = XCTestExpectation(description: "debounce callback")
+        expectation.isInverted = true // Should NOT be fulfilled
+
+        await service.debouncedSearch(query: "should be cancelled", delayMs: 100) { _ in
+            expectation.fulfill()
+        }
+        await service.cancelPendingSearch()
+
+        // Wait longer than the debounce delay to confirm it didn't fire
+        await fulfillment(of: [expectation], timeout: 0.3)
+    }
 }
