@@ -98,6 +98,9 @@ async def main():
     print(f"  Total candidates: {data['total_candidates']}")
     print(f"  Search time: {data['search_time_ms']:.1f}ms")
 
+    def _s(v):
+        return f"{v:>8}" if v is not None else f"{'-':>8}"
+
     has_graph_score = False
     for i, result in enumerate(data["results"][:5]):
         bd = result["score_breakdown"]
@@ -105,10 +108,10 @@ async def main():
         if gs is not None:
             has_graph_score = True
         print(f"  [{i}] score={result['score']:.4f}  "
-              f"vec={bd.get('vector_score', '-'):>8}  "
-              f"bm25={bd.get('bm25_score', '-'):>8}  "
-              f"graph={gs if gs is not None else '-':>8}  "
-              f"rerank={bd.get('rerank_score', '-'):>8}  "
+              f"vec={_s(bd.get('vector_score'))}  "
+              f"bm25={_s(bd.get('bm25_score'))}  "
+              f"graph={_s(gs)}  "
+              f"rerank={_s(bd.get('rerank_score'))}  "
               f"doc={result['document_title'][:40]}")
 
     if not has_graph_score:
@@ -174,7 +177,7 @@ async def main():
     for i, doc in enumerate(data_docs["results"]):
         bd = doc["score_breakdown"]
         print(f"  [{i}] score={doc['score']:.4f}  "
-              f"graph={bd.get('graph_score', '-'):>8}  "
+              f"graph={_s(bd.get('graph_score'))}  "
               f"chunks={doc['chunk_count']}  "
               f"doc={doc['document_title'][:40]}")
 
