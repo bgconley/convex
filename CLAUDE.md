@@ -17,21 +17,35 @@ Cortex is a personal knowledge base with a native macOS frontend (Swift/SwiftUI)
 
 ## Implementation Progress
 
-### Completed (verified on GPU server)
-- **Step 1.1** — Infrastructure: Docker Compose, custom PG16 (pgvector 0.8.1 + pg_search 0.21.13 + AGE 1.5.0), Redis
-- **Step 1.2** — Backend scaffolding: layered architecture, domain entities/ports, ORM tables, FastAPI app, Alembic migration (6 tables), health endpoint
-- **Step 1.3** — Document upload & CRUD: file storage, PG repository, duplicate detection (SHA-256), all 11 document endpoints
-- **Step 1.4** — Document parsing: Docling with GPU (CUDA layout + EasyOCR), PyMuPDF thumbnails, plain text and image support (images convert to temp PDF for GPU OCR path)
-- **Step 1.5** — Chunking: Chonkie SemanticChunker (potion-base-32M, threshold=0.5, chunk_size=512), section heading attribution, recursive fallback
-- **Step 1.6** — Embedding: TEI client via existing gateway (:8080), OpenAI-compatible /v1/embeddings, 1024-dim vectors, pgvector storage verified
-- **Step 1.7** — Ingestion pipeline: Celery task (parse→chunk→embed→store), status lifecycle transitions, idempotent reprocessing. Fresh CompositionRoot per task to avoid event loop bugs.
-- **Step 1.8** — Vector search: POST /search endpoint, pgvector HNSW, snippet highlighting with `<mark>`, anchor_id for jump-to-hit, `<span id="chunk-N">` injection in structured content
-- **Step 1.9** — macOS app scaffolding: SPM multi-target (Domain/AppCore/Infrastructure/Bootstrap/CortexApp), swift-tools-version 6.0, 4 tests passing, NavigationSplitView with health status
+### Phase 1: Foundation & Core Pipeline (complete)
+- **Step 1.1** — Infrastructure: Docker Compose, custom PG16 (pgvector + pg_search + AGE), Redis
+- **Step 1.2** — Backend scaffolding: layered architecture, domain entities/ports, ORM tables, FastAPI, Alembic
+- **Step 1.3** — Document upload & CRUD: file storage, PG repository, duplicate detection (SHA-256)
+- **Step 1.4** — Document parsing: Docling with GPU (CUDA layout + EasyOCR), PyMuPDF thumbnails
+- **Step 1.5** — Chunking: Chonkie SemanticChunker (potion-base-32M, threshold=0.5, chunk_size=512)
+- **Step 1.6** — Embedding: TEI client via existing gateway (:8080), 1024-dim vectors
+- **Step 1.7** — Ingestion pipeline: Celery task (parse→chunk→embed→NER→graph→store)
+- **Step 1.8** — Vector search: POST /search endpoint, pgvector HNSW, snippet highlighting
+- **Step 1.9** — macOS app scaffolding: SPM multi-target, 5 targets, NavigationSplitView
+- **Step 1.10** — Document Library & Import: grid/list view, Table, drag-drop, import progress with polling
+- **Step 1.11** — Document Viewer: PDF (PDFKit), HTML (WKWebView), Markdown, XLSX (sheet tabs), image, QuickLook dual-view
+- **Step 1.12** — Search UI: Cmd+K overlay, debounced search, keyboard nav, hit navigation (anchor/page)
+
+### Phase 2: Enhanced Search (complete)
+- **Step 2.1** — BM25 full-text search: pg_search indexes, `|||`/`&&&`/`###` operators, query parsing
+- **Step 2.2** — Hybrid search: vector + BM25 with RRF (w_vec=0.6, w_bm25=0.4, k=60)
+- **Step 2.3** — Reranker: mxbai-rerank-large-v2 via existing service (:9006), ~80ms overhead
+- **Step 2.4** — Document-level search: POST /search/documents, chunk aggregation by document
+- **Step 2.5** — Frontend search enhancements: filters (type, date, collection), Passages/Documents toggle, score breakdown tooltip, "More from this document" expansion
+
+### Phase 3: Knowledge Graph & NER (in progress)
+- **Step 3.1** — NER: GLiNER HTTP client (:9002), 18 cross-domain entity labels, entity dedup, ingestion pipeline step
+- **Step 3.2** — Knowledge graph: Apache AGE, Document/Entity nodes, MENTIONS/CO_OCCURS edges, graph cleanup on delete
 
 ### Next Step
-- **Step 1.10** — macOS App: Document Library & Import (grid/list view, drag-and-drop, thumbnails, file picker)
-- Then: Step 1.11 (Document Viewer), Step 1.12 (Basic Search UI)
-- Then: Phase 2 (BM25 hybrid search + reranking), Phase 3 (NER + knowledge graph), Phase 4 (polish)
+- **Step 3.3** — Graph-Enhanced Search (add graph signal to RRF)
+- Then: Step 3.4 (Entity API), Step 3.5 (Frontend entities)
+- Then: Phase 4 (Collections, Spotlight, polish)
 
 ---
 
@@ -137,9 +151,26 @@ One canonical document per SHA-256 hash. Duplicate upload returns existing docum
 ### Document Viewing (Dual Representation)
 - **PDF/Markdown/TXT/Images**: Single viewer (PDFKit, WKWebView, Text, Image).
 - **DOCX/XLSX**: Structured view (HTML/JSON with search anchors) + Fidelity view (original via QuickLook). Toolbar toggle: `Structured | Original`.
+- Backend returns `format: "html"` for all Docling-processed docs. Frontend routes by `format` for md/txt, by `fileType` for pdf/images and docx/xlsx (dual toggle).
+
+### Search Pipeline
+1. Vector search (pgvector HNSW) + BM25 search (pg_search `|||`/`&&&`/`###`) run in parallel
+2. Reciprocal Rank Fusion merges results (w_vec=0.6, w_bm25=0.4, k=60)
+3. Neural reranking via mxbai-rerank-large-v2 (optional, `rerank=true` default)
+4. Score breakdown: `vector_score`, `bm25_score`, `rerank_score` in response
+5. Document-level search: `POST /search/documents` aggregates by document
 
 ### Search Hit Navigation
 Search results include `page_number`, `chunk_start_char`, `chunk_end_char`, and `anchor_id`. Structured views inject `<span id="chunk-N">` anchors. PDFs scroll to page; HTML/structured views scroll to anchor.
+
+### Knowledge Graph (Apache AGE)
+- Graph: `knowledge_graph` created by `init.sql`
+- Nodes: `Document` (doc_id, title), `Entity` (normalized_name, type, name)
+- Edges: `MENTIONS` (Document→Entity, count, confidence), `CO_OCCURS` (Entity→Entity, count)
+- Document deletion cleans up graph nodes (orphans removed) and entity mention counts
+
+### NER Entity Labels
+18 cross-domain zero-shot labels for GLiNER: person, organization, location, date, monetary value, product, event, technology, software, medical condition, medication, medical procedure, law, regulation, contract term, financial instrument, account number, vehicle.
 
 ### Celery Task Pattern
 Each Celery task creates a **fresh CompositionRoot** inside `asyncio.run()`. Do NOT cache the root or any async resources (SQLAlchemy engine, httpx client) across task invocations — they are event-loop-bound and will fail with "Future attached to a different loop" on the second task.
@@ -167,7 +198,7 @@ cd frontend && swift build && open Package.swift  # opens in Xcode
 ### Unit Tests (Mac, local)
 ```bash
 # Backend domain + application tests (no GPU, no DB needed)
-cd backend && .venv/bin/python -m pytest tests/test_domain/
+cd backend && .venv/bin/python -m pytest tests/test_domain/ tests/test_application/
 
 # Frontend (requires Xcode SDK)
 cd frontend && DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer swift test
@@ -199,21 +230,25 @@ ssh -i /Users/brennanconley/vibecode/infx/ubuntu24_ed25519 bgconley@10.25.0.50
 cd ~/convex && git pull origin main
 cd infrastructure && docker compose build api worker && docker compose up -d api worker
 
-# 3. Run inspection scripts inside containers
-docker compose exec -T api python /app/tests/test_ingestion_inspect.py
-docker compose exec -T api python /app/tests/test_search_inspect.py
-docker compose exec -T api python /app/tests/test_embedder_inspect.py
-docker compose exec -T api python /app/tests/test_chunker_inspect.py
+# 3. Run inspection scripts inside containers (pipe via stdin)
+docker compose exec -T api python - < ../backend/tests/test_ingestion_inspect.py
 ```
 
-**Inspection scripts available in containers:**
+**Inspection scripts available:**
 
 | Script | Tests |
 |--------|-------|
 | `test_ingestion_inspect.py` | Full pipeline: upload → parse → chunk → embed → search → cleanup |
 | `test_search_inspect.py` | 4-query search across 3 documents, ranking verification |
 | `test_embedder_inspect.py` | Batch embed, query embed, cosine similarity, pgvector round-trip |
-| `test_chunker_inspect.py` | Semantic chunking, section mapping, Docling structured dict inspection |
+| `test_chunker_inspect.py` | Semantic chunking, section mapping, Docling structured dict |
+| `test_bm25_inspect.py` | BM25 keyword, phrase, conjunction, non-matching searches |
+| `test_hybrid_inspect.py` | Hybrid search via public endpoint, score breakdown |
+| `test_reranker_inspect.py` | Reranker wiring, score propagation, latency |
+| `test_reranker_full_inspect.py` | Multi-doc relevance, concurrent GPU stability |
+| `test_docsearch_inspect.py` | Document-level search aggregation |
+| `test_ner_inspect.py` | NER extraction, entity dedup, mention persistence |
+| `test_graph_inspect.py` | Knowledge graph population, CO_OCCURS, cross-doc traversal |
 
 **What runs where:**
 
@@ -232,3 +267,9 @@ docker compose exec -T api python /app/tests/test_chunker_inspect.py
 - **Celery event loop**: Fresh CompositionRoot per task. See "Celery Task Pattern" above.
 - **Swift tests**: Require `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` because default CommandLineTools SDK lacks XCTest.
 - **WebSocket events**: `/ws/events` endpoint and Redis pub/sub bridge are specified in the plan but not yet implemented. Status updates currently require polling.
+- **AGE + asyncpg**: asyncpg rejects multiple statements per execute. Split `LOAD 'age'` and `SET search_path` into separate calls via `_load_age()`. SQLAlchemy `text()` interprets Cypher `:LABEL` as bind params — use `exec_driver_sql()` via `_cypher()` helper.
+- **AGE Cypher limitations**: Apache AGE doesn't support `WHERE NOT EXISTS { MATCH ... }` subquery syntax. Use count-based orphan detection instead.
+- **APIClient URL construction**: `URL.appendingPathComponent` percent-encodes `?` and `=`. Use `buildURL()` with string concatenation for paths with query strings.
+- **HTML wrapping**: Backend returns full HTML documents from Docling; detect via presence of `</head>` and inject CSS rather than re-wrapping.
+- **pg_search operators**: ParadeDB 0.21.13 uses `|||` (OR), `&&&` (AND), `###` (phrase). Legacy `@@@` still supported. `pdb.score(id)` for BM25 scoring.
+- **nvidia-persistenced**: GPU containers need this daemon running. If missing: `sudo systemctl start nvidia-persistenced && sudo nvidia-smi -pm 1`. Cannot `enable` (no Install section) — must `start`.
