@@ -242,8 +242,26 @@ async def get_document_chunks(document_id: UUID, request: Request):
 
 @router.get("/{document_id}/entities")
 async def get_document_entities(document_id: UUID, request: Request):
-    # Entity extraction is Phase 3
-    return {"entities": [], "message": "Entity extraction not yet implemented"}
+    doc_service = request.app.state.document_service
+    doc = await doc_service.get(document_id)
+    if doc is None:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    entity_service = request.app.state.entity_service
+    entities = await entity_service.get_document_entities(document_id)
+    return {
+        "entities": [
+            {
+                "id": str(e.id),
+                "name": e.name,
+                "entity_type": e.entity_type,
+                "normalized_name": e.normalized_name,
+                "document_count": e.document_count,
+                "mention_count": e.mention_count,
+            }
+            for e in entities
+        ]
+    }
 
 
 @router.post("/{document_id}/reprocess")

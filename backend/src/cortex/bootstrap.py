@@ -1,4 +1,5 @@
 from cortex.application.document_service import DocumentService
+from cortex.application.entity_service import EntityService
 from cortex.application.ingestion_service import IngestionService
 from cortex.application.search_service import SearchService
 from cortex.infrastructure.file_storage import LocalFileStorage
@@ -60,6 +61,11 @@ class CompositionRoot:
             chunk_repo=self.chunk_repo,
             file_storage=self.file_storage,
             ner=self.ner,
+            entity_repo=self.entity_repo,
+            graph_repo=self.graph_repo,
+        )
+
+        self.entity_service = EntityService(
             entity_repo=self.entity_repo,
             graph_repo=self.graph_repo,
         )

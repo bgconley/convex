@@ -128,6 +128,14 @@ class PGEntityRepository:
             row = await session.get(EntityRow, entity_id)
             return self._to_domain(row) if row else None
 
+    async def count(self, entity_type: str | None = None) -> int:
+        async with self._session_factory() as session:
+            stmt = select(func.count()).select_from(EntityRow)
+            if entity_type:
+                stmt = stmt.where(EntityRow.entity_type == entity_type)
+            result = await session.scalar(stmt)
+            return result or 0
+
     async def delete_by_document(self, document_id: UUID) -> None:
         """Delete mentions for a document, recompute counts, remove orphaned entities."""
         async with self._session_factory() as session:

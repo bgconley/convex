@@ -39,6 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.document_service = root.document_service
     app.state.ingestion_service = root.ingestion_service
     app.state.search_service = root.search_service
+    app.state.entity_service = root.entity_service
     app.state.file_storage = root.file_storage
     app.state.chunk_repo = root.chunk_repo
 

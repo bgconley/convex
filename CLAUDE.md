@@ -42,10 +42,10 @@ Cortex is a personal knowledge base with a native macOS frontend (Swift/SwiftUI)
 - **Step 3.1** — NER: GLiNER HTTP client (:9002), 18 cross-domain entity labels, entity dedup, ingestion pipeline step
 - **Step 3.2** — Knowledge graph: Apache AGE, Document/Entity nodes, MENTIONS/CO_OCCURS edges, graph cleanup on delete
 - **Step 3.3** — Graph-enhanced search: query NER → entity expansion via CO_OCCURS (1-2 hops) → chunk lookup via entity_mentions → 3-way RRF (w_vec=0.5, w_bm25=0.3, w_graph=0.2), `include_graph` toggle, `graph_score` in response
+- **Step 3.4** — Entity API: GET /entities (paginated, type-filterable), GET /entities/{id} (detail + docs + related), GET /entities/{id}/related, GET /graph/explore, GET /documents/{id}/entities (real data), EntityService, 8 tests
 
 ### Next Step
-- **Step 3.4** — Entity API endpoints (GET /entities, GET /entities/{id}/related, etc.)
-- Then: Step 3.5 (Frontend entities)
+- **Step 3.5** — Frontend entity browsing UI
 - Then: Phase 4 (Collections, Spotlight, polish)
 
 ---
@@ -252,6 +252,8 @@ docker compose exec -T api python - < ../backend/tests/test_ingestion_inspect.py
 | `test_docsearch_inspect.py` | Document-level search aggregation |
 | `test_ner_inspect.py` | NER extraction, entity dedup, mention persistence |
 | `test_graph_inspect.py` | Knowledge graph population, CO_OCCURS, cross-doc traversal |
+| `test_graph_search_inspect.py` | Graph-enhanced search: graph_score in results, include_graph toggle, entity expansion |
+| `test_entity_api_inspect.py` | Entity API: list, filter, detail, related, graph explore, per-document entities |
 
 **What runs where:**
 
@@ -276,3 +278,5 @@ docker compose exec -T api python - < ../backend/tests/test_ingestion_inspect.py
 - **HTML wrapping**: Backend returns full HTML documents from Docling; detect via presence of `</head>` and inject CSS rather than re-wrapping.
 - **pg_search operators**: ParadeDB 0.21.13 uses `|||` (OR), `&&&` (AND), `###` (phrase). Legacy `@@@` still supported. `pdb.score(id)` for BM25 scoring.
 - **nvidia-persistenced**: GPU containers need this daemon running. If missing: `sudo systemctl start nvidia-persistenced && sudo nvidia-smi -pm 1`. Cannot `enable` (no Install section) — must `start`.
+- **Inspection scripts in container**: Inspection tests piped via stdin (`docker compose exec -T api python - < ../backend/tests/foo.py`) always run the host's current copy. Running directly inside the container (`docker exec cortex-api python /app/tests/foo.py`) runs the copy baked at build time, which may be stale if no rebuild was done after a test-only commit.
+- **Graph search query NER**: Uses a dummy `Chunk` wrapper to call `NERPort.extract_entities()` with query text. Threshold is 0.3 (lower than ingestion's 0.4) to catch more entity mentions in short queries. If NER or graph expansion fails, graph signal is silently skipped (returns empty list).
