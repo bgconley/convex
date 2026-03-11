@@ -3,10 +3,17 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from uuid import UUID
+from uuid import UUID, uuid4
 
-from cortex.domain.chunk import ScoredChunk
-from cortex.domain.ports import ChunkRepository, DocumentRepository, EmbedderPort, RerankerPort
+from cortex.domain.chunk import Chunk, ScoredChunk
+from cortex.domain.ports import (
+    ChunkRepository,
+    DocumentRepository,
+    EmbedderPort,
+    GraphSearchPort,
+    NERPort,
+    RerankerPort,
+)
 
 
 class SearchService:
@@ -14,15 +21,20 @@ class SearchService:
 
     Phase 1: vector-only search (embed query → pgvector HNSW).
     Phase 2: hybrid vector + BM25 with Reciprocal Rank Fusion.
-    Phase 3 adds graph expansion.
+    Phase 3: graph expansion — entity-based retrieval via knowledge graph.
 
     Depends on domain ports only — no infrastructure imports.
     """
 
-    # RRF parameters (per IMPLEMENTATION_PLAN.md Step 2.2)
+    # RRF parameters
     RRF_K = 60
+    # Weights without graph signal
     RRF_W_VEC = 0.6
     RRF_W_BM25 = 0.4
+    # Weights with graph signal (per ARCHITECTURE_BRAINSTORM.md §6.6)
+    RRF_W_VEC_GRAPH = 0.5
+    RRF_W_BM25_GRAPH = 0.3
+    RRF_W_GRAPH = 0.2
 
     def __init__(
         self,
@@ -30,11 +42,15 @@ class SearchService:
         chunk_repo: ChunkRepository,
         doc_repo: DocumentRepository,
         reranker: RerankerPort | None = None,
+        ner: NERPort | None = None,
+        graph_search: GraphSearchPort | None = None,
     ) -> None:
         self._embedder = embedder
         self._chunk_repo = chunk_repo
         self._doc_repo = doc_repo
         self._reranker = reranker
+        self._ner = ner
+        self._graph_search = graph_search
 
     async def search(
         self,
@@ -42,24 +58,38 @@ class SearchService:
         top_k: int = 10,
         file_type: str | None = None,
         rerank: bool = True,
+        include_graph: bool = True,
     ) -> SearchResponse:
-        """Hybrid search: vector + BM25 with RRF, then neural reranking.
+        """Hybrid search: vector + BM25 (+ graph) with RRF, then neural reranking.
 
-        1. Run vector search and BM25 search concurrently
+        1. Run vector, BM25, and graph search concurrently
         2. Compute RRF scores to merge and rank (top 50)
         3. Rerank top candidates with mxbai-rerank-large-v2 (if available)
         4. Enrich with document metadata
         """
         start = time.monotonic()
 
-        # 1. Parallel retrieval
+        # 1. Parallel retrieval (vector + BM25 + optional graph)
         parsed_bm25_query = self._parse_bm25_query(query)
-        vec_task = self._vector_search(query, top_k=50)
-        bm25_task = self._chunk_repo.bm25_search(parsed_bm25_query, top_k=50)
-        vec_results, bm25_results = await asyncio.gather(vec_task, bm25_task)
+        vec_coro = self._vector_search(query, top_k=50)
+        bm25_coro = self._chunk_repo.bm25_search(parsed_bm25_query, top_k=50)
 
-        # 2. RRF fusion
-        fused = self._rrf_fusion(vec_results, bm25_results)
+        graph_enabled = (
+            include_graph
+            and self._ner is not None
+            and self._graph_search is not None
+        )
+        if graph_enabled:
+            graph_coro = self._graph_entity_search(query, top_k=50)
+            vec_results, bm25_results, graph_results = await asyncio.gather(
+                vec_coro, bm25_coro, graph_coro,
+            )
+        else:
+            vec_results, bm25_results = await asyncio.gather(vec_coro, bm25_coro)
+            graph_results = []
+
+        # 2. RRF fusion (3-way if graph results present, 2-way otherwise)
+        fused = self._rrf_fusion(vec_results, bm25_results, graph_results)
 
         # 3. Neural reranking (optional)
         rerank_scores: dict[UUID, float] = {}
@@ -68,7 +98,6 @@ class SearchService:
 
         # 4. If reranked, reorder by rerank score; otherwise keep RRF order
         if rerank_scores:
-            # Reranked candidates get rerank score as primary; unreranked drop to the end
             fused.sort(
                 key=lambda c: rerank_scores.get(c.chunk_id, -1.0),
                 reverse=True,
@@ -109,6 +138,7 @@ class SearchService:
                     score=final_score,
                     vector_score=candidate.vector_score,
                     bm25_score=candidate.bm25_score,
+                    graph_score=candidate.graph_score,
                     rerank_score=rerank_score,
                     chunk_start_char=candidate.start_char,
                     chunk_end_char=candidate.end_char,
@@ -187,6 +217,7 @@ class SearchService:
                     score=candidate.score,
                     vector_score=None,
                     bm25_score=candidate.score,
+                    graph_score=None,
                     chunk_start_char=candidate.start_char,
                     chunk_end_char=candidate.end_char,
                     anchor_id=anchor_id,
@@ -211,10 +242,11 @@ class SearchService:
         top_k: int = 10,
         file_type: str | None = None,
         rerank: bool = True,
+        include_graph: bool = True,
     ) -> DocumentSearchResponse:
         """Document-level search: aggregate chunk scores per document.
 
-        Runs the full hybrid search pipeline (vector + BM25 + RRF + rerank),
+        Runs the full hybrid search pipeline (vector + BM25 + graph + RRF + rerank),
         then groups results by document_id. Each document's score is the max
         chunk score, and the top-scoring chunk provides the snippet.
         """
@@ -223,6 +255,7 @@ class SearchService:
         # Run chunk-level search with a higher top_k to get good coverage
         chunk_response = await self.search(
             query=query, top_k=50, file_type=file_type, rerank=rerank,
+            include_graph=include_graph,
         )
 
         # Aggregate by document
@@ -241,6 +274,7 @@ class SearchService:
                 score=best.score,
                 vector_score=best.vector_score,
                 bm25_score=best.bm25_score,
+                graph_score=best.graph_score,
                 rerank_score=best.rerank_score,
                 best_chunk_snippet=best.highlighted_snippet,
                 best_chunk_section=best.section_heading,
@@ -268,21 +302,58 @@ class SearchService:
         query_vec = await self._embedder.embed_query(query)
         return await self._chunk_repo.vector_search(query_vec, top_k=top_k)
 
+    async def _graph_entity_search(self, query: str, top_k: int = 50) -> list[ScoredChunk]:
+        """Extract entities from query via NER, then expand via knowledge graph.
+
+        Creates a temporary Chunk from the query text to reuse the NERPort
+        interface, extracts entity names, and delegates to GraphSearchPort.
+        """
+        # Use lower threshold for short query text (vs 0.4 for ingestion)
+        dummy = Chunk(
+            id=uuid4(), document_id=uuid4(), chunk_text=query,
+            chunk_index=0, start_char=0, end_char=len(query), token_count=0,
+        )
+        try:
+            extractions = await self._ner.extract_entities([dummy], threshold=0.3)
+        except Exception:
+            return []
+
+        if not extractions:
+            return []
+
+        entity_names = list({e.normalized_name for e in extractions})
+        try:
+            return await self._graph_search.search_by_entities(entity_names, top_k)
+        except Exception:
+            return []
+
     def _rrf_fusion(
         self,
         vec_results: list[ScoredChunk],
         bm25_results: list[ScoredChunk],
+        graph_results: list[ScoredChunk] | None = None,
     ) -> list[FusedChunk]:
-        """Reciprocal Rank Fusion: merge vector and BM25 ranked lists.
+        """Reciprocal Rank Fusion: merge vector, BM25, and optional graph ranked lists.
 
-        RRF_score = w_vec / (k + rank_vec) + w_bm25 / (k + rank_bm25)
+        When graph results are present:
+          RRF = 0.5/(k+rank_vec) + 0.3/(k+rank_bm25) + 0.2/(k+rank_graph)
+        Without graph:
+          RRF = 0.6/(k+rank_vec) + 0.4/(k+rank_bm25)
 
         Chunks appearing in only one list get score from that list only.
-        Returns fused candidates sorted by RRF score descending.
+        Returns fused candidates sorted by RRF score descending (top 50).
         """
         k = self.RRF_K
-        w_vec = self.RRF_W_VEC
-        w_bm25 = self.RRF_W_BM25
+        use_graph = bool(graph_results)
+
+        if use_graph:
+            w_vec = self.RRF_W_VEC_GRAPH
+            w_bm25 = self.RRF_W_BM25_GRAPH
+            w_graph = self.RRF_W_GRAPH
+        else:
+            w_vec = self.RRF_W_VEC
+            w_bm25 = self.RRF_W_BM25
+            w_graph = 0.0
 
         # Build rank maps (1-indexed)
         vec_rank: dict[UUID, int] = {}
@@ -297,8 +368,15 @@ class SearchService:
             bm25_rank[chunk.chunk_id] = rank
             bm25_score_map[chunk.chunk_id] = chunk.score
 
+        graph_rank: dict[UUID, int] = {}
+        graph_score_map: dict[UUID, float] = {}
+        if graph_results:
+            for rank, chunk in enumerate(graph_results, start=1):
+                graph_rank[chunk.chunk_id] = rank
+                graph_score_map[chunk.chunk_id] = chunk.score
+
         # Collect all unique chunk IDs
-        all_ids = set(vec_rank.keys()) | set(bm25_rank.keys())
+        all_ids = set(vec_rank.keys()) | set(bm25_rank.keys()) | set(graph_rank.keys())
 
         # Build chunk lookup for metadata
         chunk_lookup: dict[UUID, ScoredChunk] = {}
@@ -307,6 +385,10 @@ class SearchService:
         for c in bm25_results:
             if c.chunk_id not in chunk_lookup:
                 chunk_lookup[c.chunk_id] = c
+        if graph_results:
+            for c in graph_results:
+                if c.chunk_id not in chunk_lookup:
+                    chunk_lookup[c.chunk_id] = c
 
         # Compute RRF scores
         fused: list[FusedChunk] = []
@@ -316,6 +398,8 @@ class SearchService:
                 rrf += w_vec / (k + vec_rank[cid])
             if cid in bm25_rank:
                 rrf += w_bm25 / (k + bm25_rank[cid])
+            if cid in graph_rank:
+                rrf += w_graph / (k + graph_rank[cid])
 
             chunk = chunk_lookup[cid]
             fused.append(FusedChunk(
@@ -330,6 +414,7 @@ class SearchService:
                 score=rrf,
                 vector_score=vec_score.get(cid),
                 bm25_score=bm25_score_map.get(cid),
+                graph_score=graph_score_map.get(cid),
             ))
 
         fused.sort(key=lambda c: c.score, reverse=True)
@@ -417,7 +502,7 @@ class FusedChunk:
     __slots__ = (
         "chunk_id", "document_id", "chunk_text", "chunk_index",
         "start_char", "end_char", "section_heading", "page_number",
-        "score", "vector_score", "bm25_score",
+        "score", "vector_score", "bm25_score", "graph_score",
     )
 
     def __init__(self, **kwargs):
@@ -429,7 +514,8 @@ class SearchResultItem:
     __slots__ = (
         "chunk_id", "document_id", "document_title", "document_type",
         "chunk_text", "highlighted_snippet", "section_heading",
-        "page_number", "score", "vector_score", "bm25_score", "rerank_score",
+        "page_number", "score", "vector_score", "bm25_score",
+        "graph_score", "rerank_score",
         "chunk_start_char", "chunk_end_char", "anchor_id",
     )
 
@@ -452,7 +538,7 @@ class SearchResponse:
 class DocumentSearchResult:
     __slots__ = (
         "document_id", "document_title", "document_type",
-        "score", "vector_score", "bm25_score", "rerank_score",
+        "score", "vector_score", "bm25_score", "graph_score", "rerank_score",
         "best_chunk_snippet", "best_chunk_section", "best_chunk_page",
         "best_chunk_anchor_id", "chunk_count",
     )

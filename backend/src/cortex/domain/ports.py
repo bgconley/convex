@@ -111,6 +111,9 @@ class GraphPort(Protocol):
     async def get_related_entities(
         self, entity_id: UUID, hops: int = 2
     ) -> list[Entity]: ...
+    async def get_related_by_name(
+        self, normalized_name: str, hops: int = 2, limit: int = 20
+    ) -> list[dict]: ...
     async def get_entity_documents(
         self, entity_id: UUID
     ) -> list[tuple[UUID, str]]: ...
@@ -118,6 +121,14 @@ class GraphPort(Protocol):
         self, document_id: UUID
     ) -> list[Entity]: ...
     async def delete_document(self, document_id: UUID) -> None: ...
+
+
+class GraphSearchPort(Protocol):
+    """Graph-based search via entity expansion."""
+
+    async def search_by_entities(
+        self, entity_names: list[str], top_k: int = 50
+    ) -> list[ScoredChunk]: ...
 
 
 class FileStoragePort(Protocol):

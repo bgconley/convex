@@ -505,6 +505,201 @@ class TestDocumentSearch:
         assert len(response.results) == 3
 
 
+class FakeNER:
+    """NER test double — extracts pre-configured entities from any chunk text."""
+
+    def __init__(self, extractions: list[EntityExtraction] | None = None):
+        self._extractions = extractions or []
+        self.called = False
+
+    async def extract_entities(
+        self, chunks: list[Chunk], threshold: float = 0.4
+    ) -> list[EntityExtraction]:
+        self.called = True
+        return self._extractions
+
+
+class FakeGraphSearch:
+    """GraphSearch test double — returns pre-configured scored chunks."""
+
+    def __init__(self, chunks: list[ScoredChunk] | None = None):
+        self._chunks = chunks or []
+        self.called = False
+        self.last_entity_names: list[str] | None = None
+
+    async def search_by_entities(
+        self, entity_names: list[str], top_k: int = 50
+    ) -> list[ScoredChunk]:
+        self.called = True
+        self.last_entity_names = entity_names
+        return self._chunks[:top_k]
+
+
+class TestGraphEnhancedSearch:
+    """Tests for graph-enhanced search (Step 3.3)."""
+
+    @pytest.mark.asyncio
+    async def test_graph_search_runs_with_vector_and_bm25(self):
+        """When include_graph=True and NER+graph are wired, all three signals run."""
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="John Smith works at Acme", score=0.9)
+        graph_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="John Smith works at Acme", score=0.8)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        ner = FakeNER(extractions=[
+            EntityExtraction(text="John Smith", label="person", confidence=0.95,
+                             start_char=0, end_char=10),
+        ])
+        graph_search = FakeGraphSearch(chunks=[graph_chunk])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, ner=ner, graph_search=graph_search,
+        )
+        response = await service.search("John Smith", include_graph=True)
+
+        assert ner.called
+        assert graph_search.called
+        assert len(response.results) == 1
+
+    @pytest.mark.asyncio
+    async def test_rrf_weights_change_with_graph(self):
+        """With graph results, RRF uses 3-way weights (0.5/0.3/0.2)."""
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="entity chunk", score=0.9)
+        graph_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="entity chunk", score=0.8)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        ner = FakeNER(extractions=[
+            EntityExtraction(text="entity", label="technology", confidence=0.9,
+                             start_char=0, end_char=6),
+        ])
+        graph_search = FakeGraphSearch(chunks=[graph_chunk])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, ner=ner, graph_search=graph_search,
+        )
+        response = await service.search("entity", include_graph=True)
+
+        result = response.results[0]
+        # With 3-way RRF: score = 0.5/(60+1) + 0.3/(60+1) + 0.2/(60+1)
+        expected_rrf = 0.5 / 61 + 0.3 / 61 + 0.2 / 61
+        assert abs(result.score - expected_rrf) < 1e-6
+
+    @pytest.mark.asyncio
+    async def test_graph_score_in_results(self):
+        """Graph score appears in search result score breakdown."""
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=0.85)
+        graph_chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=0.7)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        ner = FakeNER(extractions=[
+            EntityExtraction(text="test", label="technology", confidence=0.8,
+                             start_char=0, end_char=4),
+        ])
+        graph_search = FakeGraphSearch(chunks=[graph_chunk])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, ner=ner, graph_search=graph_search,
+        )
+        response = await service.search("test", include_graph=True)
+
+        result = response.results[0]
+        assert result.vector_score == 0.85
+        assert result.graph_score == 0.7
+        assert result.bm25_score is None
+
+    @pytest.mark.asyncio
+    async def test_include_graph_false_disables_graph(self):
+        """When include_graph=False, NER and graph search are not called."""
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        ner = FakeNER(extractions=[
+            EntityExtraction(text="test", label="technology", confidence=0.8,
+                             start_char=0, end_char=4),
+        ])
+        graph_search = FakeGraphSearch(chunks=[chunk])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, ner=ner, graph_search=graph_search,
+        )
+        response = await service.search("test", include_graph=False)
+
+        assert not ner.called
+        assert not graph_search.called
+        # Without graph, RRF uses 2-way weights (0.6/0.4)
+        result = response.results[0]
+        expected_rrf = 0.6 / 61  # vec only, rank 1
+        assert abs(result.score - expected_rrf) < 1e-6
+        assert result.graph_score is None
+
+    @pytest.mark.asyncio
+    async def test_no_entities_found_falls_back(self):
+        """If NER extracts no entities, graph signal is empty and 2-way RRF is used."""
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[chunk])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        ner = FakeNER(extractions=[])  # No entities found
+        graph_search = FakeGraphSearch()
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, ner=ner, graph_search=graph_search,
+        )
+        response = await service.search("something generic", include_graph=True)
+
+        assert ner.called
+        assert not graph_search.called  # Not called because no entities
+        assert len(response.results) == 1
+        # Falls back to 2-way RRF since graph_results is empty
+        result = response.results[0]
+        expected_rrf = 0.6 / 61 + 0.4 / 61  # Both vec and bm25 at rank 1
+        assert abs(result.score - expected_rrf) < 1e-6
+
+    @pytest.mark.asyncio
+    async def test_graph_only_chunk_appears_in_results(self):
+        """A chunk found only by graph search still appears via RRF."""
+        doc_id = uuid4()
+        vec_id = uuid4()
+        graph_only_id = uuid4()
+        vec_chunk = _make_scored_chunk(doc_id, chunk_id=vec_id, text="vector hit", score=0.9, chunk_index=0)
+        graph_chunk = _make_scored_chunk(doc_id, chunk_id=graph_only_id, text="graph hit", score=0.8, chunk_index=1)
+        chunk_repo = FakeChunkRepo(vec_chunks=[vec_chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+        ner = FakeNER(extractions=[
+            EntityExtraction(text="entity", label="person", confidence=0.9,
+                             start_char=0, end_char=6),
+        ])
+        graph_search = FakeGraphSearch(chunks=[graph_chunk])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, ner=ner, graph_search=graph_search,
+        )
+        response = await service.search("entity query", top_k=10, include_graph=True)
+
+        assert len(response.results) == 2
+        ids = {r.chunk_id for r in response.results}
+        assert vec_id in ids
+        assert graph_only_id in ids
+        # Graph-only chunk should have graph_score but no vector/bm25 score
+        graph_result = next(r for r in response.results if r.chunk_id == graph_only_id)
+        assert graph_result.graph_score == 0.8
+        assert graph_result.vector_score is None
+        assert graph_result.bm25_score is None
+
+
 class TestHighlightSnippet:
     def test_highlights_query_terms(self):
         snippet = SearchService._highlight_snippet(

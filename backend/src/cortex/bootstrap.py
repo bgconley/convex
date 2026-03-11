@@ -7,6 +7,7 @@ from cortex.infrastructure.ml.docling_parser import DoclingParser
 from cortex.infrastructure.graph.age_repository import AGEGraphRepository
 from cortex.infrastructure.ml.gliner_ner import GlinerNER
 from cortex.infrastructure.ml.mxbai_reranker import MxbaiReranker
+from cortex.infrastructure.search.graph_search import GraphSearchAdapter
 from cortex.infrastructure.ml.tei_embedder import TEIEmbedder
 from cortex.infrastructure.persistence.chunk_repo import PGChunkRepository
 from cortex.infrastructure.persistence.entity_repo import PGEntityRepository
@@ -63,9 +64,16 @@ class CompositionRoot:
             graph_repo=self.graph_repo,
         )
 
+        self.graph_search = GraphSearchAdapter(
+            session_factory=self.session_factory,
+            graph_repo=self.graph_repo,
+        )
+
         self.search_service = SearchService(
             embedder=self.embedder,
             chunk_repo=self.chunk_repo,
             doc_repo=self.doc_repo,
             reranker=self.reranker,
+            ner=self.ner,
+            graph_search=self.graph_search,
         )

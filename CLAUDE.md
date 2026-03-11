@@ -41,10 +41,11 @@ Cortex is a personal knowledge base with a native macOS frontend (Swift/SwiftUI)
 ### Phase 3: Knowledge Graph & NER (in progress)
 - **Step 3.1** — NER: GLiNER HTTP client (:9002), 18 cross-domain entity labels, entity dedup, ingestion pipeline step
 - **Step 3.2** — Knowledge graph: Apache AGE, Document/Entity nodes, MENTIONS/CO_OCCURS edges, graph cleanup on delete
+- **Step 3.3** — Graph-enhanced search: query NER → entity expansion via CO_OCCURS (1-2 hops) → chunk lookup via entity_mentions → 3-way RRF (w_vec=0.5, w_bm25=0.3, w_graph=0.2), `include_graph` toggle, `graph_score` in response
 
 ### Next Step
-- **Step 3.3** — Graph-Enhanced Search (add graph signal to RRF)
-- Then: Step 3.4 (Entity API), Step 3.5 (Frontend entities)
+- **Step 3.4** — Entity API endpoints (GET /entities, GET /entities/{id}/related, etc.)
+- Then: Step 3.5 (Frontend entities)
 - Then: Phase 4 (Collections, Spotlight, polish)
 
 ---
@@ -154,10 +155,12 @@ One canonical document per SHA-256 hash. Duplicate upload returns existing docum
 - Backend returns `format: "html"` for all Docling-processed docs. Frontend routes by `format` for md/txt, by `fileType` for pdf/images and docx/xlsx (dual toggle).
 
 ### Search Pipeline
-1. Vector search (pgvector HNSW) + BM25 search (pg_search `|||`/`&&&`/`###`) run in parallel
-2. Reciprocal Rank Fusion merges results (w_vec=0.6, w_bm25=0.4, k=60)
+1. Vector search (pgvector HNSW) + BM25 search (pg_search `|||`/`&&&`/`###`) + Graph search (NER → entity expansion → chunk lookup) run in parallel
+2. Reciprocal Rank Fusion merges results:
+   - With graph: w_vec=0.5, w_bm25=0.3, w_graph=0.2, k=60
+   - Without graph (`include_graph=false`): w_vec=0.6, w_bm25=0.4, k=60
 3. Neural reranking via mxbai-rerank-large-v2 (optional, `rerank=true` default)
-4. Score breakdown: `vector_score`, `bm25_score`, `rerank_score` in response
+4. Score breakdown: `vector_score`, `bm25_score`, `graph_score`, `rerank_score` in response
 5. Document-level search: `POST /search/documents` aggregates by document
 
 ### Search Hit Navigation
