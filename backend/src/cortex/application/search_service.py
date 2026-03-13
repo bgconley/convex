@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import re
 import time
+from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 from cortex.domain.chunk import Chunk, ScoredChunk
@@ -67,7 +68,12 @@ class SearchService:
         self,
         query: str,
         top_k: int = 10,
-        file_type: str | None = None,
+        file_types: list[str] | None = None,
+        collection_ids: list[UUID] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        tags: list[str] | None = None,
+        entity_types: list[str] | None = None,
         rerank: bool = True,
         include_graph: bool = True,
     ) -> SearchResponse:
@@ -123,6 +129,7 @@ class SearchService:
         # 5. Enrich with document metadata
         results: list[SearchResultItem] = []
         seen_chunks: set[UUID] = set()
+        entity_type_cache: dict[UUID, set[str]] = {}
 
         for candidate in fused:
             if candidate.chunk_id in seen_chunks:
@@ -130,10 +137,19 @@ class SearchService:
             seen_chunks.add(candidate.chunk_id)
 
             doc = await self._doc_repo.get(candidate.document_id)
-            if doc is None:
+            if not self._is_searchable_document(doc):
                 continue
 
-            if file_type and doc.file_type.value != file_type:
+            if not await self._matches_document_filters(
+                doc=doc,
+                file_types=file_types,
+                collection_ids=collection_ids,
+                date_from=date_from,
+                date_to=date_to,
+                tags=tags,
+                entity_types=entity_types,
+                entity_type_cache=entity_type_cache,
+            ):
                 continue
 
             snippet = self._highlight_snippet(candidate.chunk_text, query)
@@ -157,6 +173,7 @@ class SearchService:
                     bm25_score=candidate.bm25_score,
                     graph_score=candidate.graph_score,
                     rerank_score=rerank_score,
+                    entities=[],
                     chunk_start_char=candidate.start_char,
                     chunk_end_char=candidate.end_char,
                     anchor_id=anchor_id,
@@ -165,6 +182,8 @@ class SearchService:
 
             if len(results) >= top_k:
                 break
+
+        await self._attach_entity_mentions(results)
 
         elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -257,7 +276,12 @@ class SearchService:
         self,
         query: str,
         top_k: int = 10,
-        file_type: str | None = None,
+        file_types: list[str] | None = None,
+        collection_ids: list[UUID] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        tags: list[str] | None = None,
+        entity_types: list[str] | None = None,
     ) -> SearchResponse:
         """BM25-only keyword search via pg_search."""
         start = time.monotonic()
@@ -267,6 +291,7 @@ class SearchService:
 
         results: list[SearchResultItem] = []
         seen_chunks: set[UUID] = set()
+        entity_type_cache: dict[UUID, set[str]] = {}
 
         for candidate in candidates:
             if candidate.chunk_id in seen_chunks:
@@ -274,10 +299,19 @@ class SearchService:
             seen_chunks.add(candidate.chunk_id)
 
             doc = await self._doc_repo.get(candidate.document_id)
-            if doc is None:
+            if not self._is_searchable_document(doc):
                 continue
 
-            if file_type and doc.file_type.value != file_type:
+            if not await self._matches_document_filters(
+                doc=doc,
+                file_types=file_types,
+                collection_ids=collection_ids,
+                date_from=date_from,
+                date_to=date_to,
+                tags=tags,
+                entity_types=entity_types,
+                entity_type_cache=entity_type_cache,
+            ):
                 continue
 
             snippet = self._highlight_snippet(candidate.chunk_text, query)
@@ -297,6 +331,7 @@ class SearchService:
                     vector_score=None,
                     bm25_score=candidate.score,
                     graph_score=None,
+                    entities=[],
                     chunk_start_char=candidate.start_char,
                     chunk_end_char=candidate.end_char,
                     anchor_id=anchor_id,
@@ -305,6 +340,8 @@ class SearchService:
 
             if len(results) >= top_k:
                 break
+
+        await self._attach_entity_mentions(results)
 
         elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -319,7 +356,12 @@ class SearchService:
         self,
         query: str,
         top_k: int = 10,
-        file_type: str | None = None,
+        file_types: list[str] | None = None,
+        collection_ids: list[UUID] | None = None,
+        date_from: datetime | None = None,
+        date_to: datetime | None = None,
+        tags: list[str] | None = None,
+        entity_types: list[str] | None = None,
         rerank: bool = True,
         include_graph: bool = True,
     ) -> DocumentSearchResponse:
@@ -335,7 +377,15 @@ class SearchService:
         # More chunks retrieved → more unique documents in the aggregation.
         chunk_top_k = min(top_k * 5, 200)
         chunk_response = await self.search(
-            query=query, top_k=chunk_top_k, file_type=file_type, rerank=rerank,
+            query=query,
+            top_k=chunk_top_k,
+            file_types=file_types,
+            collection_ids=collection_ids,
+            date_from=date_from,
+            date_to=date_to,
+            tags=tags,
+            entity_types=entity_types,
+            rerank=rerank,
             include_graph=include_graph,
         )
 
@@ -502,6 +552,78 @@ class SearchService:
         return fused[:50]
 
     @staticmethod
+    def _is_searchable_document(doc) -> bool:
+        """Only ready documents are eligible for search results."""
+        if doc is None:
+            return False
+        status = getattr(doc.status, "value", doc.status)
+        return status == "ready"
+
+    async def _matches_document_filters(
+        self,
+        *,
+        doc,
+        file_types: list[str] | None,
+        collection_ids: list[UUID] | None,
+        date_from: datetime | None,
+        date_to: datetime | None,
+        tags: list[str] | None,
+        entity_types: list[str] | None,
+        entity_type_cache: dict[UUID, set[str]],
+    ) -> bool:
+        if file_types and doc.file_type.value not in set(file_types):
+            return False
+
+        if collection_ids and doc.collection_id not in set(collection_ids):
+            return False
+
+        if date_from or date_to:
+            created_at = doc.created_at
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            normalized_from = date_from
+            normalized_to = date_to
+            if normalized_from and normalized_from.tzinfo is None:
+                normalized_from = normalized_from.replace(tzinfo=UTC)
+            if normalized_to and normalized_to.tzinfo is None:
+                normalized_to = normalized_to.replace(tzinfo=UTC)
+            if normalized_from and created_at < normalized_from:
+                return False
+            if normalized_to and created_at > normalized_to:
+                return False
+
+        if tags:
+            doc_tags = set(doc.tags or [])
+            if not doc_tags.intersection(tags):
+                return False
+
+        if entity_types:
+            if self._entity_repo is None:
+                return False
+            cached = entity_type_cache.get(doc.id)
+            if cached is None:
+                doc_entities = await self._entity_repo.get_by_document(doc.id)
+                cached = {e.entity_type for e in doc_entities}
+                entity_type_cache[doc.id] = cached
+            if not cached.intersection(entity_types):
+                return False
+
+        return True
+
+    async def _attach_entity_mentions(self, results: list["SearchResultItem"]) -> None:
+        if not results or self._entity_repo is None:
+            return
+
+        chunk_ids = [r.chunk_id for r in results]
+        try:
+            mentions_by_chunk = await self._entity_repo.get_mentions_by_chunk_ids(chunk_ids)
+        except Exception:
+            return
+
+        for result in results:
+            result.entities = mentions_by_chunk.get(result.chunk_id, [])
+
+    @staticmethod
     def _strip_boolean_operators(text: str) -> str:
         """Remove boolean AND operators from text, preserving the terms."""
         parts = re.split(r'\bAND\b', text)
@@ -596,11 +718,12 @@ class SearchResultItem:
         "chunk_id", "document_id", "document_title", "document_type",
         "chunk_text", "highlighted_snippet", "section_heading",
         "page_number", "score", "vector_score", "bm25_score",
-        "graph_score", "rerank_score",
+        "graph_score", "rerank_score", "entities",
         "chunk_start_char", "chunk_end_char", "anchor_id",
     )
 
     def __init__(self, **kwargs):
+        self.entities = []
         for k, v in kwargs.items():
             setattr(self, k, v)
 

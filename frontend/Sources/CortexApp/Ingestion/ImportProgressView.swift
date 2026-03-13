@@ -90,7 +90,9 @@ struct ImportProgressView: View {
     }
 
     private func uploadAndTrack(index: Int) async {
-        let url = fileStates[index].fileURL
+        let url = await MainActor.run {
+            fileStates[index].fileURL
+        }
 
         await MainActor.run {
             fileStates[index].phase = .uploading
@@ -111,11 +113,34 @@ struct ImportProgressView: View {
                 fileStates[index].documentId = response.id
             }
 
-            await pollProcessingStatus(index: index, documentId: response.id)
+            await withTaskGroup(of: Void.self) { group in
+                group.addTask {
+                    await consumeProcessingEvents(index: index, documentId: response.id)
+                }
+                group.addTask {
+                    await pollProcessingStatus(index: index, documentId: response.id)
+                }
+                await group.next()
+                group.cancelAll()
+            }
 
         } catch {
             await MainActor.run {
                 fileStates[index].phase = .failed(error.localizedDescription)
+            }
+        }
+    }
+
+    private func consumeProcessingEvents(index: Int, documentId: UUID) async {
+        if let latestEvent = await ingestionService.latestEvent(for: documentId),
+           await applyProcessingEvent(latestEvent, index: index) {
+            return
+        }
+
+        let stream = await ingestionService.eventStream(for: documentId)
+        for await event in stream {
+            if await applyProcessingEvent(event, index: index) {
+                return
             }
         }
     }
@@ -143,6 +168,28 @@ struct ImportProgressView: View {
                 }
             }
         }
+    }
+
+    private func applyProcessingEvent(_ event: ProcessingEvent, index: Int) async -> Bool {
+        if let status = event.processingStatus {
+            await MainActor.run {
+                if status == .failed, let message = event.errorMessage, !message.isEmpty {
+                    fileStates[index].phase = .failed(message)
+                } else {
+                    fileStates[index].phase = .processing(status)
+                }
+            }
+            return !status.isProcessing
+        }
+
+        if let message = event.errorMessage, !message.isEmpty {
+            await MainActor.run {
+                fileStates[index].phase = .failed(message)
+            }
+            return true
+        }
+
+        return false
     }
 
     // MARK: - Display helpers

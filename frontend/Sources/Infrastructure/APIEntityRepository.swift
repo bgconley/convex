@@ -24,6 +24,11 @@ package struct APIEntityRepository: EntityRepositoryPort, Sendable {
         try await client.get("entities/\(id.uuidString)")
     }
 
+    package func listEntityTypes() async throws -> [String] {
+        let response: EntityTypeListResponse = try await client.get("entities/types")
+        return response.entityTypes
+    }
+
     package func getRelated(id: UUID, hops: Int) async throws -> [RelatedEntity] {
         try await client.get("entities/\(id.uuidString)/related?hops=\(hops)")
     }

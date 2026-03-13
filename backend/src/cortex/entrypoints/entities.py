@@ -11,9 +11,11 @@ from cortex.schemas.entity_schemas import (
     EntityDocumentResponse,
     EntityListResponse,
     EntityResponse,
+    EntityTypeListResponse,
     GraphExploreResponse,
     RelatedEntityResponse,
 )
+from cortex.infrastructure.ml.gliner_ner import ENTITY_LABELS
 
 router = APIRouter()
 graph_router = APIRouter()
@@ -50,6 +52,25 @@ async def list_entities(
         limit=limit,
         offset=offset,
     )
+
+
+@router.get("/types", response_model=EntityTypeListResponse)
+async def list_entity_types(request: Request):
+    entity_service = request.app.state.entity_service
+    persisted_types = await entity_service.list_entity_types()
+
+    ordered_types: list[str] = []
+    seen: set[str] = set()
+    for entity_type in ENTITY_LABELS:
+        if entity_type not in seen:
+            ordered_types.append(entity_type)
+            seen.add(entity_type)
+    for entity_type in persisted_types:
+        if entity_type not in seen:
+            ordered_types.append(entity_type)
+            seen.add(entity_type)
+
+    return EntityTypeListResponse(entity_types=ordered_types)
 
 
 @router.get("/{entity_id}", response_model=EntityDetailResponse)

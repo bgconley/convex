@@ -42,3 +42,12 @@ class RerankResult:
     index: int
     score: float
     text: str
+
+
+@dataclass
+class EntityMention:
+    """Entity mention attached to a specific chunk hit."""
+
+    name: str
+    entity_type: str
+    confidence: float

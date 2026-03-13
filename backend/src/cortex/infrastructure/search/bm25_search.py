@@ -63,7 +63,8 @@ class BM25SearchAdapter:
             "c.start_char, c.end_char, c.section_heading, c.page_number, "
             "pdb.score(c.id) AS bm25_score "
             "FROM chunks c "
-            f"WHERE c.chunk_text ||| '{safe_query}' "
+            "JOIN documents d ON d.id = c.document_id "
+            f"WHERE d.status = 'ready' AND c.chunk_text ||| '{safe_query}' "
             "ORDER BY bm25_score DESC "
             f"LIMIT {int(top_k)}"
         )
@@ -77,7 +78,8 @@ class BM25SearchAdapter:
             "c.start_char, c.end_char, c.section_heading, c.page_number, "
             "pdb.score(c.id) AS bm25_score "
             "FROM chunks c "
-            f"WHERE c.chunk_text &&& '{safe_query}' "
+            "JOIN documents d ON d.id = c.document_id "
+            f"WHERE d.status = 'ready' AND c.chunk_text &&& '{safe_query}' "
             "ORDER BY bm25_score DESC "
             f"LIMIT {int(top_k)}"
         )
@@ -91,7 +93,8 @@ class BM25SearchAdapter:
             "c.start_char, c.end_char, c.section_heading, c.page_number, "
             "pdb.score(c.id) AS bm25_score "
             "FROM chunks c "
-            f"WHERE c.chunk_text ### '{safe_phrase}' "
+            "JOIN documents d ON d.id = c.document_id "
+            f"WHERE d.status = 'ready' AND c.chunk_text ### '{safe_phrase}' "
             "ORDER BY bm25_score DESC "
             f"LIMIT {int(top_k)}"
         )

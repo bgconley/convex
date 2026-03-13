@@ -10,8 +10,8 @@ import pytest
 from uuid import UUID, uuid4
 
 from cortex.domain.chunk import Chunk, ChunkResult, ScoredChunk
-from cortex.domain.document import Document, FileType
-from cortex.domain.entity import Entity, EntityExtraction, RerankResult
+from cortex.domain.document import Document, FileType, ProcessingStatus
+from cortex.domain.entity import Entity, EntityExtraction, EntityMention, RerankResult
 from cortex.application.search_service import SearchService
 
 
@@ -116,8 +116,15 @@ class FakeDocRepo:
 class FakeEntityRepo:
     """EntityRepository test double for suggestion tests."""
 
-    def __init__(self, entities: list[Entity] | None = None):
+    def __init__(
+        self,
+        entities: list[Entity] | None = None,
+        doc_entities: dict[UUID, list[Entity]] | None = None,
+        mentions_by_chunk: dict[UUID, list[EntityMention]] | None = None,
+    ):
         self._entities = entities or []
+        self._doc_entities = doc_entities or {}
+        self._mentions_by_chunk = mentions_by_chunk or {}
 
     async def search_by_prefix(self, prefix: str, limit: int = 5) -> list[Entity]:
         prefix_lower = prefix.lower()
@@ -130,7 +137,7 @@ class FakeEntityRepo:
         return []
 
     async def get_by_document(self, document_id):
-        return []
+        return self._doc_entities.get(document_id, [])
 
     async def list_all(self, entity_type=None, limit=100, offset=0):
         return self._entities[:limit]
@@ -144,19 +151,29 @@ class FakeEntityRepo:
     async def delete_by_document(self, document_id):
         pass
 
+    async def get_mentions_by_chunk_ids(self, chunk_ids: list[UUID]):
+        return {
+            chunk_id: self._mentions_by_chunk.get(chunk_id, [])
+            for chunk_id in chunk_ids
+        }
 
-def _make_doc(doc_id: UUID) -> Document:
+
+def _make_doc(
+    doc_id: UUID,
+    title: str = "Test Doc",
+    status: ProcessingStatus = ProcessingStatus.READY,
+) -> Document:
     from datetime import datetime, UTC
     return Document(
         id=doc_id,
-        title="Test Doc",
+        title=title,
         original_filename="test.txt",
         file_type=FileType.TXT,
         file_size_bytes=100,
         file_hash="abc123",
         mime_type="text/plain",
         original_path="originals/test.txt",
-        status="ready",
+        status=status,
         created_at=datetime.now(UTC),
         updated_at=datetime.now(UTC),
     )
@@ -267,7 +284,7 @@ class TestBM25Search:
         doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
 
         service = SearchService(embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo)
-        response = await service.bm25_search("content", file_type="pdf")
+        response = await service.bm25_search("content", file_types=["pdf"])
         assert len(response.results) == 0
 
     @pytest.mark.asyncio
@@ -374,6 +391,38 @@ class TestHybridSearch:
         assert len(response.results) == 1
         assert response.results[0].vector_score == 0.9
         assert response.results[0].bm25_score is None
+
+    @pytest.mark.asyncio
+    async def test_hybrid_skips_failed_documents(self):
+        failed_id = uuid4()
+        ready_id = uuid4()
+        failed_chunk = _make_scored_chunk(
+            failed_id, text="rocket company spacecraft", score=0.99
+        )
+        ready_chunk = _make_scored_chunk(
+            ready_id, text="rocket company spacecraft", score=0.98
+        )
+        chunk_repo = FakeChunkRepo(
+            vec_chunks=[failed_chunk, ready_chunk],
+            bm25_chunks=[failed_chunk, ready_chunk],
+        )
+        doc_repo = FakeDocRepo({
+            failed_id: _make_doc(
+                failed_id, title="Failed Doc", status=ProcessingStatus.FAILED
+            ),
+            ready_id: _make_doc(
+                ready_id, title="Ready Doc", status=ProcessingStatus.READY
+            ),
+        })
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo
+        )
+        response = await service.search(
+            "rocket company launching spacecraft", top_k=10, rerank=False
+        )
+
+        assert [r.document_title for r in response.results] == ["Ready Doc"]
 
 
 class TestReranking:
@@ -810,6 +859,72 @@ class TestExtractHighlightTerms:
         assert "phrase" in terms
         assert "rest" in terms
         assert "AND" not in terms
+
+
+class TestSearchFiltersAndMentions:
+    @pytest.mark.asyncio
+    async def test_applies_file_collection_tag_and_date_filters(self):
+        from datetime import datetime, timedelta, UTC
+
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="filter test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[chunk])
+
+        doc = _make_doc(doc_id)
+        doc.file_type = FileType.PDF
+        doc.collection_id = uuid4()
+        doc.tags = ["ml", "research"]
+        doc.created_at = datetime.now(UTC) - timedelta(days=1)
+        doc.updated_at = doc.created_at
+
+        service = SearchService(
+            embedder=FakeEmbedder(),
+            chunk_repo=chunk_repo,
+            doc_repo=FakeDocRepo({doc_id: doc}),
+        )
+
+        response = await service.search(
+            "filter",
+            file_types=["pdf"],
+            collection_ids=[doc.collection_id],
+            date_from=datetime.now(UTC) - timedelta(days=2),
+            date_to=datetime.now(UTC),
+            tags=["ml"],
+            rerank=False,
+        )
+        assert len(response.results) == 1
+
+        response_miss = await service.search(
+            "filter",
+            file_types=["docx"],
+            rerank=False,
+        )
+        assert len(response_miss.results) == 0
+
+    @pytest.mark.asyncio
+    async def test_attaches_entity_mentions_to_search_results(self):
+        doc_id = uuid4()
+        chunk_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, chunk_id=chunk_id, text="Ada Lovelace", score=0.9)
+
+        mentions = {
+            chunk_id: [
+                EntityMention(name="Ada Lovelace", entity_type="person", confidence=0.98),
+                EntityMention(name="Analytical Engine", entity_type="technology", confidence=0.76),
+            ]
+        }
+
+        service = SearchService(
+            embedder=FakeEmbedder(),
+            chunk_repo=FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[]),
+            doc_repo=FakeDocRepo({doc_id: _make_doc(doc_id)}),
+            entity_repo=FakeEntityRepo(mentions_by_chunk=mentions),
+        )
+
+        response = await service.search("ada", rerank=False)
+        assert len(response.results) == 1
+        assert len(response.results[0].entities) == 2
+        assert response.results[0].entities[0].name == "Ada Lovelace"
 
 
 def _make_entity(name: str, entity_type: str = "person") -> Entity:

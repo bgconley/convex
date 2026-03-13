@@ -4,6 +4,9 @@ import AppCore
 
 struct SearchOverlayView: View {
     let searchService: SearchService
+    let collections: [Collection]
+    let availableTags: [String]
+    let availableEntityTypes: [String]
     let defaultTopK: Int
     let defaultRerank: Bool
     let defaultIncludeGraph: Bool
@@ -23,6 +26,8 @@ struct SearchOverlayView: View {
     @State private var dateFrom: Date?
     @State private var dateTo: Date?
     @State private var collectionId: UUID?
+    @State private var selectedTags: Set<String> = []
+    @State private var selectedEntityTypes: Set<String> = []
     @State private var expandedDocIds: Set<UUID> = []
     @State private var suggestions: SearchSuggestionsResponse?
     @State private var suggestionsTask: Task<Void, Never>?
@@ -60,7 +65,12 @@ struct SearchOverlayView: View {
                 fileTypeFilter: $fileTypeFilter,
                 dateFrom: $dateFrom,
                 dateTo: $dateTo,
-                collectionId: $collectionId
+                collectionId: $collectionId,
+                selectedTags: $selectedTags,
+                selectedEntityTypes: $selectedEntityTypes,
+                collections: collections,
+                availableTags: availableTags,
+                availableEntityTypes: availableEntityTypes
             )
             if hasSuggestions && resultCount == 0 {
                 Divider()
@@ -92,6 +102,15 @@ struct SearchOverlayView: View {
             if query.count >= 2 { performSearch(query) }
         }
         .onChange(of: dateTo) { _, _ in
+            if query.count >= 2 { performSearch(query) }
+        }
+        .onChange(of: collectionId) { _, _ in
+            if query.count >= 2 { performSearch(query) }
+        }
+        .onChange(of: selectedTags) { _, _ in
+            if query.count >= 2 { performSearch(query) }
+        }
+        .onChange(of: selectedEntityTypes) { _, _ in
             if query.count >= 2 { performSearch(query) }
         }
     }
@@ -289,10 +308,14 @@ struct SearchOverlayView: View {
         let hasFileType = fileTypeFilter != nil
         let hasDate = dateFrom != nil || dateTo != nil
         let hasCollection = collectionId != nil
-        guard hasFileType || hasDate || hasCollection else { return nil }
+        let hasTags = !selectedTags.isEmpty
+        let hasEntityTypes = !selectedEntityTypes.isEmpty
+        guard hasFileType || hasDate || hasCollection || hasTags || hasEntityTypes else { return nil }
         return SearchFilters(
             fileTypes: fileTypeFilter.map { [$0] },
             collectionIds: collectionId.map { [$0] },
+            tags: selectedTags.isEmpty ? nil : Array(selectedTags).sorted(),
+            entityTypes: selectedEntityTypes.isEmpty ? nil : Array(selectedEntityTypes).sorted(),
             dateFrom: dateFrom,
             dateTo: dateTo
         )

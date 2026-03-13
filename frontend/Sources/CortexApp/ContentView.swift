@@ -18,7 +18,10 @@ struct ContentView: View {
     @State private var selectedCollectionId: UUID?
     @State private var showNewCollectionSheet = false
     @State private var showNewSmartCollectionSheet = false
-    @State private var smartCollectionTags: [String] = []
+    @State private var availableTags: [String] = []
+    @State private var availableEntityTypes: [String] = []
+    @State private var didConnectWebSocket = false
+    @State private var didStartSpotlightIndex = false
 
     struct EntityFilter {
         let entityId: UUID
@@ -79,7 +82,9 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     Button {
                         Task {
-                            smartCollectionTags = (try? await root.collectionService.listTags()) ?? []
+                            if availableTags.isEmpty {
+                                await loadAvailableTags()
+                            }
                             showNewSmartCollectionSheet = true
                         }
                     } label: {
@@ -135,18 +140,27 @@ struct ContentView: View {
                 VStack {
                     SearchOverlayView(
                         searchService: root.searchService,
+                        collections: collections.filter { !$0.isSmart },
+                        availableTags: availableTags,
+                        availableEntityTypes: availableEntityTypes,
                         defaultTopK: root.settings.defaultTopK,
                         defaultRerank: root.settings.defaultRerank,
                         defaultIncludeGraph: root.settings.defaultIncludeGraph,
                         onSelectResult: { item in
                             searchHitAnchorId = item.anchorId
                             searchHitPageNumber = item.pageNumber
+                            selectedEntityId = nil
+                            entityFilter = nil
+                            selectedCollectionId = nil
                             selectedDocumentId = item.documentId
                             selectedSidebarItem = .allDocuments
                         },
                         onSelectDocument: { item in
                             searchHitAnchorId = item.bestChunkAnchorId
                             searchHitPageNumber = item.bestChunkPage
+                            selectedEntityId = nil
+                            entityFilter = nil
+                            selectedCollectionId = nil
                             selectedDocumentId = item.documentId
                             selectedSidebarItem = .allDocuments
                         },
@@ -228,7 +242,26 @@ struct ContentView: View {
         .task {
             await checkHealth()
             await loadCollections()
-            await indexAllDocumentsInSpotlight()
+            await loadAvailableTags()
+            if !didConnectWebSocket {
+                didConnectWebSocket = true
+                await root.webSocketClient.connect { event in
+                    Task {
+                        await root.ingestionService.handle(event: event)
+                    }
+                }
+            }
+            await loadAvailableEntityTypes()
+            if !didStartSpotlightIndex {
+                didStartSpotlightIndex = true
+                Task(priority: .background) {
+                    await indexAllDocumentsInSpotlight()
+                }
+            }
+        }
+        .onDisappear {
+            didConnectWebSocket = false
+            Task { await root.webSocketClient.disconnect() }
         }
         .sheet(isPresented: $showNewCollectionSheet) {
             NewCollectionSheet(
@@ -244,10 +277,13 @@ struct ContentView: View {
         .sheet(isPresented: $showNewSmartCollectionSheet) {
             NewSmartCollectionSheet(
                 collectionService: root.collectionService,
-                allTags: smartCollectionTags,
+                allTags: availableTags,
                 onCreated: { _ in
                     showNewSmartCollectionSheet = false
-                    Task { await loadCollections() }
+                    Task {
+                        await loadCollections()
+                        await loadAvailableTags()
+                    }
                 },
                 onCancel: { showNewSmartCollectionSheet = false }
             )
@@ -294,6 +330,8 @@ struct ContentView: View {
                 entityId: selectedEntityId,
                 entityService: root.entityService,
                 onSelectDocument: { docId in
+                    selectedCollectionId = nil
+                    entityFilter = nil
                     selectedDocumentId = docId
                     selectedSidebarItem = .allDocuments
                 }
@@ -357,6 +395,10 @@ struct ContentView: View {
             let detail = try await root.entityService.getDetail(id: entityId)
             let docIds = Set(detail.documents.map(\.documentId))
             selectedSidebarItem = .allDocuments
+            selectedCollectionId = nil
+            selectedDocumentId = nil
+            searchHitAnchorId = nil
+            searchHitPageNumber = nil
             entityFilter = EntityFilter(
                 entityId: detail.entity.id,
                 entityName: detail.entity.name,
@@ -436,6 +478,22 @@ struct ContentView: View {
             collections = response.collections
         } catch {
             // Collections loading is best-effort
+        }
+    }
+
+    private func loadAvailableTags() async {
+        do {
+            availableTags = try await root.collectionService.listTags()
+        } catch {
+            // Tags are best-effort
+        }
+    }
+
+    private func loadAvailableEntityTypes() async {
+        do {
+            availableEntityTypes = try await root.entityService.listEntityTypes()
+        } catch {
+            // Entity types are best-effort
         }
     }
 

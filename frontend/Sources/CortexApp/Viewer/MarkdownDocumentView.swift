@@ -1,22 +1,17 @@
 import SwiftUI
-import WebKit
 import Infrastructure
 
-struct MarkdownDocumentView: NSViewRepresentable {
+struct MarkdownDocumentView: View {
     let markdownSource: String
     let renderer: MarkdownRenderer
+    var anchorId: String?
+    var searchQuery: String = ""
 
-    func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
-        let webView = WKWebView(frame: .zero, configuration: config)
-        webView.setValue(false, forKey: "drawsBackground")
-        let html = renderer.renderHTML(from: markdownSource)
-        webView.loadHTMLString(html, baseURL: nil)
-        return webView
-    }
-
-    func updateNSView(_ webView: WKWebView, context: Context) {
-        let html = renderer.renderHTML(from: markdownSource)
-        webView.loadHTMLString(html, baseURL: nil)
+    var body: some View {
+        HTMLWebView(
+            html: renderer.renderHTML(from: markdownSource),
+            anchorId: anchorId,
+            searchQuery: searchQuery
+        )
     }
 }

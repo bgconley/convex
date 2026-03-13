@@ -50,6 +50,9 @@ class FakeEntityRepo:
             return len([e for e in self._entities if e.entity_type == entity_type])
         return len(self._entities)
 
+    async def distinct_types(self) -> list[str]:
+        return sorted({e.entity_type for e in self._entities})
+
     async def delete_by_document(self, document_id: UUID) -> None:
         pass
 
@@ -216,3 +219,18 @@ async def test_get_document_entities():
     )
     result = await service.get_document_entities(doc_id)
     assert len(result) == 2
+
+
+@pytest.mark.asyncio
+async def test_list_entity_types_returns_distinct_sorted_types():
+    entities = [
+        _make_entity("Python", "technology"),
+        _make_entity("FastAPI", "software"),
+        _make_entity("Docker", "technology"),
+    ]
+    service = EntityService(
+        entity_repo=FakeEntityRepo(entities),
+        graph_repo=FakeGraphRepo(),
+    )
+    result = await service.list_entity_types()
+    assert result == ["software", "technology"]

@@ -145,7 +145,9 @@ class GraphSearchAdapter:
             "c.start_char, c.end_char, c.section_heading, c.page_number "
             "FROM entity_mentions em "
             "JOIN chunks c ON c.id = em.chunk_id "
+            "JOIN documents d ON d.id = c.document_id "
             f"WHERE em.entity_id::text IN ({placeholders}) "
+            "AND d.status = 'ready' "
             "ORDER BY em.confidence DESC "
             "LIMIT :fetch_limit"
         )

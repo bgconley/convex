@@ -28,7 +28,7 @@ async def _run_ingestion(document_id: str) -> dict:
         await root.ingestion_service.ingest(doc_id)
         return {"document_id": document_id, "status": "ready"}
     finally:
-        await root.embedder.close()
+        await root.aclose()
 
 
 @app.task(bind=True, name="cortex.tasks.ingest_document", max_retries=2)

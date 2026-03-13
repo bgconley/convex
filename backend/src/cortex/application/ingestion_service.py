@@ -18,6 +18,7 @@ from cortex.domain.ports import (
     MetricsPort,
     NERPort,
     ParserPort,
+    ProcessingEventsPort,
 )
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class IngestionService:
         entity_repo: EntityRepository | None = None,
         graph_repo: GraphPort | None = None,
         metrics: MetricsPort | None = None,
+        processing_events: ProcessingEventsPort | None = None,
     ) -> None:
         self._parser = parser
         self._chunker = chunker
@@ -55,6 +57,7 @@ class IngestionService:
         self._entity_repo = entity_repo
         self._graph_repo = graph_repo
         self._metrics = metrics
+        self._processing_events = processing_events
 
     async def ingest(self, document_id: UUID) -> None:
         """Run the full ingestion pipeline for a document.
@@ -74,7 +77,12 @@ class IngestionService:
 
         try:
             # 1. Parse
-            await self._doc_repo.update_status(document_id, ProcessingStatus.PARSING.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.PARSING,
+                progress_pct=0.1,
+                stage_label="Parsing document...",
+            )
             logger.info(
                 "Parsing document %s (%s)", document_id, doc.file_type.value,
                 extra={"document_id": str(document_id)},
@@ -88,7 +96,12 @@ class IngestionService:
             parse_result = await self._parser.parse(file_path, doc.file_type.value)
             stage_timings["parse"] = (time.monotonic() - t0) * 1000
 
-            await self._doc_repo.update_status(document_id, ProcessingStatus.PARSED.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.PARSED,
+                progress_pct=0.25,
+                stage_label="Document parsed",
+            )
             logger.info("Parsed: %d chars, %d words", len(parse_result.text), parse_result.metadata.word_count or 0)
 
             # Store parsed content on the document record
@@ -105,7 +118,12 @@ class IngestionService:
                 await self._file_storage.save_thumbnail(parse_result._thumbnail_data, document_id)
 
             # 2. Chunk
-            await self._doc_repo.update_status(document_id, ProcessingStatus.CHUNKING.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.CHUNKING,
+                progress_pct=0.35,
+                stage_label="Chunking document...",
+            )
             logger.info("Chunking document %s", document_id)
 
             t0 = time.monotonic()
@@ -115,7 +133,12 @@ class IngestionService:
             )
             stage_timings["chunk"] = (time.monotonic() - t0) * 1000
 
-            await self._doc_repo.update_status(document_id, ProcessingStatus.CHUNKED.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.CHUNKED,
+                progress_pct=0.5,
+                stage_label="Document chunked",
+            )
             chunk_count = len(chunk_results)
             logger.info("Chunked into %d pieces", chunk_count)
 
@@ -138,7 +161,12 @@ class IngestionService:
             ]
 
             # 3. Embed
-            await self._doc_repo.update_status(document_id, ProcessingStatus.EMBEDDING.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.EMBEDDING,
+                progress_pct=0.65,
+                stage_label="Generating embeddings...",
+            )
             logger.info("Embedding %d chunks", len(chunks))
 
             t0 = time.monotonic()
@@ -149,7 +177,12 @@ class IngestionService:
                     chunk.embedding = vec
             stage_timings["embed"] = (time.monotonic() - t0) * 1000
 
-            await self._doc_repo.update_status(document_id, ProcessingStatus.EMBEDDED.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.EMBEDDED,
+                progress_pct=0.75,
+                stage_label="Embeddings complete",
+            )
             logger.info("Embedded %d chunks", len(chunks))
 
             # 4. Store chunks with embeddings
@@ -157,8 +190,11 @@ class IngestionService:
 
             # 5. NER — extract named entities from chunks
             if self._ner and self._entity_repo:
-                await self._doc_repo.update_status(
-                    document_id, ProcessingStatus.EXTRACTING_ENTITIES.value
+                await self._set_status(
+                    document_id=document_id,
+                    status=ProcessingStatus.EXTRACTING_ENTITIES,
+                    progress_pct=0.82,
+                    stage_label="Extracting entities...",
                 )
                 logger.info("Extracting entities from %d chunks", len(chunks))
 
@@ -168,16 +204,22 @@ class IngestionService:
                 await self._entity_repo.upsert_entities(document_id, extractions, chunk_ids)
                 stage_timings["ner"] = (time.monotonic() - t0) * 1000
 
-                await self._doc_repo.update_status(
-                    document_id, ProcessingStatus.ENTITIES_EXTRACTED.value
+                await self._set_status(
+                    document_id=document_id,
+                    status=ProcessingStatus.ENTITIES_EXTRACTED,
+                    progress_pct=0.9,
+                    stage_label="Entity extraction complete",
                 )
                 entity_count = len(extractions)
                 logger.info("Extracted %d entities", entity_count)
 
             # 6. Knowledge graph — add document + entities to AGE graph
             if self._graph_repo and extractions:
-                await self._doc_repo.update_status(
-                    document_id, ProcessingStatus.BUILDING_GRAPH.value
+                await self._set_status(
+                    document_id=document_id,
+                    status=ProcessingStatus.BUILDING_GRAPH,
+                    progress_pct=0.95,
+                    stage_label="Building knowledge graph...",
                 )
                 logger.info("Building knowledge graph for document %s", document_id)
 
@@ -193,7 +235,13 @@ class IngestionService:
                 logger.info("Knowledge graph updated for document %s", document_id)
 
             # 7. Done
-            await self._doc_repo.update_status(document_id, ProcessingStatus.READY.value)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.READY,
+                progress_pct=1.0,
+                stage_label="Processing complete",
+                event_type="processing_complete",
+            )
             total_ms = (time.monotonic() - pipeline_start) * 1000
             logger.info(
                 "Ingestion complete for document %s (%.0fms)",
@@ -214,10 +262,14 @@ class IngestionService:
         except Exception:
             total_ms = (time.monotonic() - pipeline_start) * 1000
             logger.exception("Ingestion failed for document %s", document_id)
-            await self._doc_repo.update_status(
-                document_id,
-                ProcessingStatus.FAILED.value,
-                error_message=f"Ingestion failed: see worker logs",
+            await self._cleanup_partial_artifacts(document_id)
+            await self._set_status(
+                document_id=document_id,
+                status=ProcessingStatus.FAILED,
+                progress_pct=1.0,
+                stage_label="Processing failed",
+                error_message="Ingestion failed: see worker logs",
+                event_type="processing_failed",
             )
             if self._metrics:
                 self._metrics.record_ingestion(
@@ -229,3 +281,71 @@ class IngestionService:
                     entity_count=entity_count,
                 )
             raise
+
+    async def _set_status(
+        self,
+        *,
+        document_id: UUID,
+        status: ProcessingStatus,
+        progress_pct: float | None = None,
+        stage_label: str | None = None,
+        error_message: str | None = None,
+        event_type: str = "status_changed",
+    ) -> None:
+        await self._doc_repo.update_status(
+            document_id,
+            status.value,
+            error_message=error_message,
+        )
+
+        if self._processing_events is None:
+            return
+
+        event = {
+            "event_type": event_type,
+            "document_id": str(document_id),
+            "status": status.value,
+            "progress_pct": progress_pct,
+            "stage_label": stage_label,
+            "error_message": error_message,
+        }
+        try:
+            await self._processing_events.publish(event)
+        except Exception:
+            logger.exception(
+                "Failed to publish processing event for %s",
+                document_id,
+                extra={"document_id": str(document_id)},
+            )
+
+    async def _cleanup_partial_artifacts(self, document_id: UUID) -> None:
+        """Best-effort cleanup for failed ingestions.
+
+        Keep the original file and failed document row for retry/debugging, but
+        remove derived artifacts so failed documents are not searchable.
+        """
+        if self._graph_repo:
+            try:
+                await self._graph_repo.delete_document(document_id)
+            except Exception:
+                logger.exception(
+                    "Graph cleanup failed for document %s", document_id,
+                    extra={"document_id": str(document_id)},
+                )
+
+        if self._entity_repo:
+            try:
+                await self._entity_repo.delete_by_document(document_id)
+            except Exception:
+                logger.exception(
+                    "Entity cleanup failed for document %s", document_id,
+                    extra={"document_id": str(document_id)},
+                )
+
+        try:
+            await self._chunk_repo.delete_by_document(document_id)
+        except Exception:
+            logger.exception(
+                "Chunk cleanup failed for document %s", document_id,
+                extra={"document_id": str(document_id)},
+            )

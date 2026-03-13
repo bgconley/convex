@@ -27,6 +27,10 @@ class EntityListResponse(BaseModel):
     offset: int
 
 
+class EntityTypeListResponse(BaseModel):
+    entity_types: list[str]
+
+
 class EntityDocumentResponse(BaseModel):
     document_id: UUID
     title: str

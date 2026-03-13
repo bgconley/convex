@@ -187,3 +187,9 @@ class MetricsCollector:
             ),
             "recent": recent,
         }
+
+    def close(self) -> None:
+        try:
+            self._redis.close()
+        except AttributeError:
+            self._redis.connection_pool.disconnect()

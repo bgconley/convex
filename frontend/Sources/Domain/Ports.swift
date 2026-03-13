@@ -31,7 +31,14 @@ package protocol DocumentRepositoryPort: Sendable {
     func getContent(id: UUID, view: String) async throws -> DocumentContent
     func upload(fileURL: URL) async throws -> DocumentUploadResponse
     func delete(id: UUID) async throws
-    func update(id: UUID, title: String?, tags: [String]?, isFavorite: Bool?, collectionId: UUID?) async throws -> Document
+    func update(
+        id: UUID,
+        title: String?,
+        tags: [String]?,
+        isFavorite: Bool?,
+        collectionId: UUID?,
+        setCollection: Bool
+    ) async throws -> Document
 }
 
 package protocol SearchPort: Sendable {
@@ -52,6 +59,7 @@ package struct HealthStatus: Sendable, Codable {
 
 package protocol EntityRepositoryPort: Sendable {
     func list(entityType: String?, limit: Int, offset: Int) async throws -> EntityListResponse
+    func listEntityTypes() async throws -> [String]
     func getDetail(id: UUID) async throws -> EntityDetailResponse
     func getRelated(id: UUID, hops: Int) async throws -> [RelatedEntity]
     func getDocumentEntities(documentId: UUID) async throws -> [DocumentEntity]

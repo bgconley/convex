@@ -1,3 +1,5 @@
+from sqlalchemy.ext.asyncio import async_sessionmaker
+
 from cortex.application.collection_service import CollectionService
 from cortex.application.document_service import DocumentService
 from cortex.application.entity_service import EntityService
@@ -5,6 +7,7 @@ from cortex.application.ingestion_service import IngestionService
 from cortex.application.search_service import SearchService
 from cortex.infrastructure.file_storage import LocalFileStorage
 from cortex.infrastructure.metrics_collector import MetricsCollector
+from cortex.infrastructure.processing_events import RedisProcessingEvents
 from cortex.infrastructure.ml.chonkie_chunker import ChonkieChunker
 from cortex.infrastructure.ml.docling_parser import DoclingParser
 from cortex.infrastructure.graph.age_repository import AGEGraphRepository
@@ -14,7 +17,7 @@ from cortex.infrastructure.search.graph_search import GraphSearchAdapter
 from cortex.infrastructure.ml.tei_embedder import TEIEmbedder
 from cortex.infrastructure.persistence.chunk_repo import PGChunkRepository
 from cortex.infrastructure.persistence.entity_repo import PGEntityRepository
-from cortex.infrastructure.persistence.database import create_session_factory
+from cortex.infrastructure.persistence.database import create_engine
 from cortex.infrastructure.persistence.collection_repo import PGCollectionRepository
 from cortex.infrastructure.persistence.document_repo import PGDocumentRepository
 from cortex.settings import Settings
@@ -29,7 +32,8 @@ class CompositionRoot:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.session_factory = create_session_factory(settings.database_url)
+        self.engine = create_engine(settings.database_url)
+        self.session_factory = async_sessionmaker(self.engine, expire_on_commit=False)
 
         # Infrastructure adapters
         self.file_storage = LocalFileStorage(data_dir=settings.data_dir)
@@ -52,6 +56,7 @@ class CompositionRoot:
 
         # Metrics (Redis for ingestion cross-process, in-memory for search)
         self.metrics = MetricsCollector(redis_url=settings.redis_url)
+        self.processing_events = RedisProcessingEvents(redis_url=settings.redis_url)
 
         # Application services (depend on ports, not concrete types)
         self.document_service = DocumentService(
@@ -71,6 +76,7 @@ class CompositionRoot:
             entity_repo=self.entity_repo,
             graph_repo=self.graph_repo,
             metrics=self.metrics,
+            processing_events=self.processing_events,
         )
 
         self.entity_service = EntityService(
@@ -97,3 +103,9 @@ class CompositionRoot:
             entity_repo=self.entity_repo,
             metrics=self.metrics,
         )
+
+    async def aclose(self) -> None:
+        await self.embedder.close()
+        await self.processing_events.close()
+        self.metrics.close()
+        await self.engine.dispose()

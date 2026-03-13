@@ -50,6 +50,5 @@ class LocalFileStorage:
         if img_dir.exists():
             shutil.rmtree(img_dir)
 
-    @staticmethod
-    def compute_file_hash(file_data: bytes) -> str:
+    def compute_file_hash(self, file_data: bytes) -> str:
         return hashlib.sha256(file_data).hexdigest()

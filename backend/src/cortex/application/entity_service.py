@@ -34,6 +34,9 @@ class EntityService:
     async def get(self, entity_id: UUID) -> Entity | None:
         return await self._entity_repo.get(entity_id)
 
+    async def list_entity_types(self) -> list[str]:
+        return await self._entity_repo.distinct_types()
+
     async def get_entity_documents(
         self, entity_id: UUID
     ) -> list[tuple[UUID, str]]:

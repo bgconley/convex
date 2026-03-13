@@ -4,6 +4,7 @@ package actor APIClient: Sendable {
     private let baseURL: URL
     private let session: URLSession
     private let decoder: JSONDecoder
+    private let encoder: JSONEncoder
 
     package init(baseURL: URL) {
         self.baseURL = baseURL
@@ -30,6 +31,15 @@ package actor APIClient: Sendable {
             throw DecodingError.dataCorruptedError(in: container, debugDescription: "Cannot decode date: \(string)")
         }
         self.decoder = decoder
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .custom { date, encoder in
+            var container = encoder.singleValueContainer()
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            try container.encode(formatter.string(from: date))
+        }
+        self.encoder = encoder
     }
 
     package func get<T: Decodable>(_ path: String) async throws -> T {
@@ -44,7 +54,7 @@ package actor APIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try encoder.encode(body)
         let (data, response) = try await session.data(for: request)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)
@@ -98,7 +108,7 @@ package actor APIClient: Sendable {
         var request = URLRequest(url: url)
         request.httpMethod = "PATCH"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.httpBody = try JSONEncoder().encode(body)
+        request.httpBody = try encoder.encode(body)
         let (data, response) = try await session.data(for: request)
         try validateResponse(response)
         return try decoder.decode(T.self, from: data)

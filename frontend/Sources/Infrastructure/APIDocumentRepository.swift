@@ -46,21 +46,45 @@ package struct APIDocumentRepository: DocumentRepositoryPort, Sendable {
         try await client.delete("documents/\(id.uuidString)")
     }
 
-    package func update(id: UUID, title: String?, tags: [String]?, isFavorite: Bool?, collectionId: UUID?) async throws -> Document {
-        struct UpdateBody: Codable {
+    package func update(
+        id: UUID,
+        title: String?,
+        tags: [String]?,
+        isFavorite: Bool?,
+        collectionId: UUID?,
+        setCollection: Bool
+    ) async throws -> Document {
+        struct UpdateBody: Encodable {
             var title: String?
             var tags: [String]?
             var isFavorite: Bool?
             var collectionId: UUID?
+            var setCollection: Bool
             enum CodingKeys: String, CodingKey {
                 case title, tags
                 case isFavorite = "is_favorite"
                 case collectionId = "collection_id"
             }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encodeIfPresent(title, forKey: .title)
+                try container.encodeIfPresent(tags, forKey: .tags)
+                try container.encodeIfPresent(isFavorite, forKey: .isFavorite)
+                if setCollection {
+                    try container.encode(collectionId, forKey: .collectionId)
+                }
+            }
         }
         return try await client.patch(
             "documents/\(id.uuidString)",
-            body: UpdateBody(title: title, tags: tags, isFavorite: isFavorite, collectionId: collectionId)
+            body: UpdateBody(
+                title: title,
+                tags: tags,
+                isFavorite: isFavorite,
+                collectionId: collectionId,
+                setCollection: setCollection
+            )
         )
     }
 }

@@ -5,6 +5,7 @@ from fastapi import APIRouter, Query, Request
 from cortex.schemas.search_schemas import (
     DocumentSearchResponse,
     DocumentSearchResultResponse,
+    EntityMentionResponse,
     ScoreBreakdown,
     SearchRequest,
     SearchResponse,
@@ -22,7 +23,12 @@ async def search(body: SearchRequest, request: Request):
     result = await search_service.search(
         query=body.query,
         top_k=body.top_k,
-        file_type=body.filters.file_types[0] if body.filters and body.filters.file_types else None,
+        file_types=body.filters.file_types if body.filters else None,
+        collection_ids=body.filters.collection_ids if body.filters else None,
+        date_from=body.filters.date_from if body.filters else None,
+        date_to=body.filters.date_to if body.filters else None,
+        tags=body.filters.tags if body.filters else None,
+        entity_types=body.filters.entity_types if body.filters else None,
         rerank=body.rerank,
         include_graph=body.include_graph,
     )
@@ -46,6 +52,14 @@ async def search(body: SearchRequest, request: Request):
                     graph_score=r.graph_score,
                     rerank_score=r.rerank_score,
                 ),
+                entities=[
+                    EntityMentionResponse(
+                        name=e.name,
+                        entity_type=e.entity_type,
+                        confidence=e.confidence,
+                    )
+                    for e in r.entities
+                ],
                 chunk_start_char=r.chunk_start_char,
                 chunk_end_char=r.chunk_end_char,
                 anchor_id=r.anchor_id,
@@ -64,7 +78,12 @@ async def search_documents(body: SearchRequest, request: Request):
     result = await search_service.document_search(
         query=body.query,
         top_k=body.top_k,
-        file_type=body.filters.file_types[0] if body.filters and body.filters.file_types else None,
+        file_types=body.filters.file_types if body.filters else None,
+        collection_ids=body.filters.collection_ids if body.filters else None,
+        date_from=body.filters.date_from if body.filters else None,
+        date_to=body.filters.date_to if body.filters else None,
+        tags=body.filters.tags if body.filters else None,
+        entity_types=body.filters.entity_types if body.filters else None,
         rerank=body.rerank,
         include_graph=body.include_graph,
     )

@@ -27,6 +27,10 @@ struct DocumentDetailView: View {
     @State private var showTagEditor = false
     @State private var tagSuggestions: [String] = []
     @State private var selectedSuggestionIndex = -1
+    @State private var showQuickLookPreview = false
+    @State private var showFindBar = false
+    @State private var findQuery = ""
+    @FocusState private var isFindFieldFocused: Bool
 
     var body: some View {
         Group {
@@ -46,6 +50,10 @@ struct DocumentDetailView: View {
                     }
                     tagBar(document)
                     Divider()
+                    if showFindBar {
+                        findBar
+                        Divider()
+                    }
                     viewerForDocument(document)
                 }
             }
@@ -71,6 +79,30 @@ struct DocumentDetailView: View {
                         .foregroundStyle(.secondary)
                     }
                 }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button {
+                        showFindBar.toggle()
+                        if showFindBar {
+                            isFindFieldFocused = true
+                        } else {
+                            findQuery = ""
+                        }
+                    } label: {
+                        Label("Find", systemImage: "text.magnifyingglass")
+                    }
+                    .keyboardShortcut("f", modifiers: .command)
+                    .help("Find within document (Cmd+F)")
+
+                    Button {
+                        Task {
+                            await openQuickLookPreview()
+                        }
+                    } label: {
+                        Label("Quick Look", systemImage: "eye")
+                    }
+                    .keyboardShortcut(.space, modifiers: [])
+                    .help("Quick Look preview (Space)")
+                }
             }
         }
         .task(id: documentId) {
@@ -81,6 +113,18 @@ struct DocumentDetailView: View {
         }
         .onChange(of: documentId) { _, _ in
             cleanupTempFile()
+        }
+        .sheet(isPresented: $showQuickLookPreview) {
+            if let originalFileURL {
+                QuickLookView(url: originalFileURL)
+            } else {
+                ContentUnavailableView(
+                    "Preview unavailable",
+                    systemImage: "eye.slash",
+                    description: Text("The original file is not available.")
+                )
+                .frame(minWidth: 480, minHeight: 320)
+            }
         }
     }
 
@@ -236,6 +280,27 @@ struct DocumentDetailView: View {
         }
     }
 
+    private var findBar: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "text.magnifyingglass")
+                .foregroundStyle(.secondary)
+            TextField("Find in document", text: $findQuery)
+                .textFieldStyle(.roundedBorder)
+                .focused($isFindFieldFocused)
+            Button {
+                findQuery = ""
+                showFindBar = false
+            } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(.bar)
+    }
+
     private func updateTagSuggestions(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces).lowercased()
         selectedSuggestionIndex = -1
@@ -285,6 +350,7 @@ struct DocumentDetailView: View {
     }
 
     private func cleanupTempFile() {
+        showQuickLookPreview = false
         if let url = originalFileURL {
             try? FileManager.default.removeItem(at: url)
             originalFileURL = nil
@@ -296,7 +362,7 @@ struct DocumentDetailView: View {
         switch doc.fileType {
         case .pdf:
             if let data = originalData {
-                PDFDocumentView(data: data, pageNumber: pageNumber)
+                PDFDocumentView(data: data, pageNumber: pageNumber, searchQuery: findQuery)
             } else {
                 ProgressView("Loading PDF...")
             }
@@ -308,43 +374,61 @@ struct DocumentDetailView: View {
                 ProgressView("Loading image...")
             }
 
-        case .docx:
+        case .docx, .xlsx, .markdown, .txt:
             if let content {
-                HTMLDocumentView(
-                    htmlContent: content.content,
-                    originalURL: originalFileURL ?? URL(fileURLWithPath: "/dev/null"),
-                    anchorId: anchorId
+                contentViewerByFormat(content, for: doc)
+            } else {
+                ContentUnavailableView(
+                    "Document content not available",
+                    systemImage: "doc.badge.ellipsis",
+                    description: Text("Try reprocessing this document.")
                 )
-            }
-
-        case .xlsx:
-            if let content {
-                SpreadsheetView(
-                    htmlContent: content.content,
-                    originalURL: originalFileURL ?? URL(fileURLWithPath: "/dev/null"),
-                    anchorId: anchorId
-                )
-            }
-
-        case .markdown, .txt:
-            if let content {
-                contentViewerByFormat(content)
             }
         }
     }
 
     @ViewBuilder
-    private func contentViewerByFormat(_ content: DocumentContent) -> some View {
+    private func contentViewerByFormat(_ content: DocumentContent, for doc: Document) -> some View {
         switch content.format {
         case "html":
-            HTMLWebView(html: prepareHTML(content.content), anchorId: anchorId)
+            if doc.fileType == .docx {
+                HTMLDocumentView(
+                    htmlContent: content.content,
+                    originalURL: originalFileURL,
+                    anchorId: anchorId,
+                    searchQuery: findQuery
+                )
+            } else {
+                HTMLWebView(
+                    html: prepareHTML(content.content),
+                    anchorId: anchorId,
+                    searchQuery: findQuery
+                )
+            }
+        case "spreadsheet_json":
+            SpreadsheetView(
+                spreadsheetJSON: content.content,
+                originalURL: originalFileURL,
+                anchorId: anchorId,
+                searchQuery: findQuery
+            )
         case "markdown":
             MarkdownDocumentView(
                 markdownSource: content.content,
-                renderer: markdownRenderer
+                renderer: markdownRenderer,
+                anchorId: anchorId,
+                searchQuery: findQuery
+            )
+        case "plain_text":
+            PlainTextView(content: content.content, searchQuery: findQuery)
+        case "not_yet_processed":
+            ContentUnavailableView(
+                "Document not processed yet",
+                systemImage: "hourglass",
+                description: Text("Structured content will appear when processing completes.")
             )
         default:
-            PlainTextView(content: content.content)
+            PlainTextView(content: content.content, searchQuery: findQuery)
         }
     }
 
@@ -352,6 +436,9 @@ struct DocumentDetailView: View {
         isLoading = true
         errorMessage = nil
         entities = []
+        document = nil
+        content = nil
+        originalData = nil
 
         do {
             let doc = try await documentService.get(id: documentId)
@@ -361,15 +448,17 @@ struct DocumentDetailView: View {
             case .pdf, .png, .jpg, .tiff:
                 let data = try await apiClient.getData("documents/\(documentId.uuidString)/original")
                 originalData = data
+                originalFileURL = try writeOriginalTempFile(data: data, filename: doc.originalFilename)
 
             case .docx, .xlsx:
                 let docContent = try await documentService.getContent(id: documentId)
                 content = docContent
-                let data = try await apiClient.getData("documents/\(documentId.uuidString)/original")
-                let tempURL = FileManager.default.temporaryDirectory
-                    .appendingPathComponent("\(documentId.uuidString)_\(doc.originalFilename)")
-                try data.write(to: tempURL)
-                originalFileURL = tempURL
+                do {
+                    let data = try await apiClient.getData("documents/\(documentId.uuidString)/original")
+                    originalFileURL = try writeOriginalTempFile(data: data, filename: doc.originalFilename)
+                } catch {
+                    // Structured content remains usable even if fidelity view is unavailable.
+                }
 
             case .markdown, .txt:
                 let docContent = try await documentService.getContent(id: documentId)
@@ -390,5 +479,32 @@ struct DocumentDetailView: View {
             errorMessage = error.localizedDescription
             isLoading = false
         }
+    }
+
+    private func openQuickLookPreview() async {
+        guard let doc = document else { return }
+
+        do {
+            if originalFileURL == nil {
+                let data: Data
+                if let originalData {
+                    data = originalData
+                } else {
+                    data = try await apiClient.getData("documents/\(documentId.uuidString)/original")
+                }
+                originalFileURL = try writeOriginalTempFile(data: data, filename: doc.originalFilename)
+            }
+            showQuickLookPreview = originalFileURL != nil
+        } catch {
+            showQuickLookPreview = false
+        }
+    }
+
+    private func writeOriginalTempFile(data: Data, filename: String) throws -> URL {
+        let safeFilename = filename.replacingOccurrences(of: "/", with: "_")
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("\(documentId.uuidString)_\(safeFilename)")
+        try data.write(to: tempURL, options: .atomic)
+        return tempURL
     }
 }

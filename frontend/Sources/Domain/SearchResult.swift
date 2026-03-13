@@ -24,6 +24,7 @@ package struct SearchFilters: Sendable, Codable {
     package var fileTypes: [String]?
     package var collectionIds: [UUID]?
     package var tags: [String]?
+    package var entityTypes: [String]?
     package var dateFrom: Date?
     package var dateTo: Date?
 
@@ -31,12 +32,14 @@ package struct SearchFilters: Sendable, Codable {
         fileTypes: [String]? = nil,
         collectionIds: [UUID]? = nil,
         tags: [String]? = nil,
+        entityTypes: [String]? = nil,
         dateFrom: Date? = nil,
         dateTo: Date? = nil
     ) {
         self.fileTypes = fileTypes
         self.collectionIds = collectionIds
         self.tags = tags
+        self.entityTypes = entityTypes
         self.dateFrom = dateFrom
         self.dateTo = dateTo
     }
@@ -45,6 +48,7 @@ package struct SearchFilters: Sendable, Codable {
         case tags
         case fileTypes = "file_types"
         case collectionIds = "collection_ids"
+        case entityTypes = "entity_types"
         case dateFrom = "date_from"
         case dateTo = "date_to"
     }

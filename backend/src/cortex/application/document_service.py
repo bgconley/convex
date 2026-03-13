@@ -4,7 +4,6 @@ from uuid import UUID
 
 from cortex.domain.document import Document, FileType, ProcessingStatus
 from cortex.domain.ports import DocumentRepository, EntityRepository, FileStoragePort, GraphPort
-from cortex.infrastructure.file_storage import LocalFileStorage
 
 
 ALLOWED_EXTENSIONS: dict[str, FileType] = {
@@ -78,7 +77,7 @@ class DocumentService:
             )
 
         # Compute hash and check for duplicates
-        file_hash = LocalFileStorage.compute_file_hash(file_data)
+        file_hash = self._file_storage.compute_file_hash(file_data)
         existing = await self._doc_repo.get_by_hash(file_hash)
         if existing is not None:
             return existing, True
@@ -140,20 +139,24 @@ class DocumentService:
         self,
         document_id: UUID,
         title: str | None = None,
+        title_provided: bool = False,
         tags: list[str] | None = None,
+        tags_provided: bool = False,
         collection_id: UUID | None = None,
+        collection_id_provided: bool = False,
         is_favorite: bool | None = None,
+        is_favorite_provided: bool = False,
     ) -> Document | None:
         doc = await self._doc_repo.get(document_id)
         if doc is None:
             return None
-        if title is not None:
+        if title_provided and title is not None:
             doc.title = title
-        if tags is not None:
+        if tags_provided and tags is not None:
             doc.tags = tags
-        if collection_id is not None:
+        if collection_id_provided:
             doc.collection_id = collection_id
-        if is_favorite is not None:
+        if is_favorite_provided and is_favorite is not None:
             doc.is_favorite = is_favorite
         await self._doc_repo.update(doc)
         return doc

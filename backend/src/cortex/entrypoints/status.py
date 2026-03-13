@@ -1,7 +1,12 @@
+import asyncio
+
 import httpx
-from fastapi import APIRouter, Request
+import redis.asyncio as aioredis
+from fastapi import APIRouter, Request, WebSocket
+from starlette.websockets import WebSocketDisconnect
 
 from cortex.schemas.stats_schemas import DashboardResponse, StatsResponse
+from cortex.infrastructure.processing_events import PROCESSING_CHANNEL
 
 router = APIRouter()
 
@@ -26,8 +31,6 @@ async def health_check(request: Request) -> dict:
 
     # Check Redis
     try:
-        import redis.asyncio as aioredis
-
         r = aioredis.from_url(settings.redis_url)
         await r.ping()
         await r.aclose()
@@ -57,6 +60,73 @@ async def health_check(request: Request) -> dict:
         "status": "healthy" if all_healthy else "degraded",
         "checks": checks,
     }
+
+
+@router.get("/status/processing")
+async def processing_status(request: Request) -> dict:
+    """Queue/processing status for polling fallback when WebSocket is unavailable."""
+    doc_repo = request.app.state.doc_repo
+
+    in_progress_statuses = [
+        "uploading",
+        "stored",
+        "parsing",
+        "parsed",
+        "chunking",
+        "chunked",
+        "embedding",
+        "embedded",
+        "extracting_entities",
+        "entities_extracted",
+        "building_graph",
+    ]
+
+    by_status: dict[str, int] = {}
+    total_in_progress = 0
+    for status in in_progress_statuses:
+        count = await doc_repo.count(status=status)
+        by_status[status] = count
+        total_in_progress += count
+
+    active_documents: list[dict] = []
+    processing_events = getattr(request.app.state, "processing_events", None)
+    if processing_events is not None:
+        active_documents = await processing_events.get_processing_snapshot()
+
+    return {
+        "total_in_progress": total_in_progress,
+        "by_status": by_status,
+        "active_documents": active_documents,
+    }
+
+
+@router.websocket("/ws/events")
+async def ws_events(websocket: WebSocket) -> None:
+    """Redis pub/sub bridge for live processing events."""
+    await websocket.accept()
+
+    settings = websocket.app.state.settings
+    redis = aioredis.from_url(settings.redis_url, decode_responses=True)
+    pubsub = redis.pubsub()
+    await pubsub.subscribe(PROCESSING_CHANNEL)
+
+    try:
+        while True:
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True,
+                timeout=1.0,
+            )
+            if message and message.get("data"):
+                await websocket.send_text(message["data"])
+            await asyncio.sleep(0.05)
+    except WebSocketDisconnect:
+        pass
+    finally:
+        try:
+            await pubsub.unsubscribe(PROCESSING_CHANNEL)
+            await pubsub.close()
+        finally:
+            await redis.aclose()
 
 
 @router.get("/stats", response_model=StatsResponse)

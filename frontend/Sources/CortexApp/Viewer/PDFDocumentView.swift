@@ -4,10 +4,12 @@ import PDFKit
 struct PDFDocumentView: NSViewRepresentable {
     let data: Data
     let pageNumber: Int?
+    let searchQuery: String
 
-    init(data: Data, pageNumber: Int? = nil) {
+    init(data: Data, pageNumber: Int? = nil, searchQuery: String = "") {
         self.data = data
         self.pageNumber = pageNumber
+        self.searchQuery = searchQuery
     }
 
     func makeNSView(context: Context) -> PDFView {
@@ -30,6 +32,7 @@ struct PDFDocumentView: NSViewRepresentable {
         // Always navigate to the requested page — handles both initial load
         // and repeated search-hit navigation within the same document
         goToPage(pdfView: pdfView, document: pdfView.document)
+        findQuery(pdfView: pdfView, document: pdfView.document)
     }
 
     private func goToPage(pdfView: PDFView, document: PDFDocument?) {
@@ -38,5 +41,20 @@ struct PDFDocumentView: NSViewRepresentable {
         if pageIndex < document.pageCount, let page = document.page(at: pageIndex) {
             pdfView.go(to: page)
         }
+    }
+
+    private func findQuery(pdfView: PDFView, document: PDFDocument?) {
+        let trimmedQuery = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedQuery.isEmpty, let document else {
+            pdfView.setCurrentSelection(nil, animate: false)
+            return
+        }
+        let matches = document.findString(trimmedQuery, withOptions: [.caseInsensitive, .diacriticInsensitive])
+        guard let selection = matches.first else {
+            pdfView.setCurrentSelection(nil, animate: false)
+            return
+        }
+        pdfView.setCurrentSelection(selection, animate: true)
+        pdfView.go(to: selection)
     }
 }

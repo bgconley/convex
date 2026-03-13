@@ -8,7 +8,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import delete, select, func
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from cortex.domain.entity import Entity, EntityExtraction
+from cortex.domain.entity import Entity, EntityExtraction, EntityMention
 from cortex.infrastructure.persistence.tables import EntityMentionRow, EntityRow
 
 logger = logging.getLogger(__name__)
@@ -136,6 +136,16 @@ class PGEntityRepository:
             result = await session.scalar(stmt)
             return result or 0
 
+    async def distinct_types(self) -> list[str]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(EntityRow.entity_type)
+                .distinct()
+                .order_by(EntityRow.entity_type.asc())
+            )
+            result = await session.execute(stmt)
+            return [entity_type for entity_type in result.scalars().all() if entity_type]
+
     async def search_by_prefix(self, prefix: str, limit: int = 5) -> list[Entity]:
         async with self._session_factory() as session:
             stmt = (
@@ -146,6 +156,39 @@ class PGEntityRepository:
             )
             result = await session.execute(stmt)
             return [self._to_domain(row) for row in result.scalars().all()]
+
+    async def get_mentions_by_chunk_ids(
+        self, chunk_ids: list[UUID]
+    ) -> dict[UUID, list[EntityMention]]:
+        if not chunk_ids:
+            return {}
+
+        async with self._session_factory() as session:
+            stmt = (
+                select(
+                    EntityMentionRow.chunk_id,
+                    EntityRow.name,
+                    EntityRow.entity_type,
+                    EntityMentionRow.confidence,
+                )
+                .join(EntityRow, EntityRow.id == EntityMentionRow.entity_id)
+                .where(EntityMentionRow.chunk_id.in_(chunk_ids))
+                .order_by(
+                    EntityMentionRow.chunk_id,
+                    EntityMentionRow.confidence.desc(),
+                )
+            )
+            result = await session.execute(stmt)
+            grouped: dict[UUID, list[EntityMention]] = {}
+            for chunk_id, name, entity_type, confidence in result.fetchall():
+                grouped.setdefault(chunk_id, []).append(
+                    EntityMention(
+                        name=name,
+                        entity_type=entity_type,
+                        confidence=confidence,
+                    )
+                )
+            return grouped
 
     async def delete_by_document(self, document_id: UUID) -> None:
         """Delete mentions for a document, recompute counts, remove orphaned entities."""

@@ -1,5 +1,5 @@
-import Domain
 import Foundation
+import Domain
 
 /// Connects to the backend WebSocket endpoint for real-time processing events.
 /// Reconnects automatically on disconnect.
@@ -9,6 +9,7 @@ package actor WebSocketClient {
     private let session = URLSession.shared
     private var onEvent: (@Sendable (ProcessingEvent) -> Void)?
     private var isConnected = false
+    private var shouldReconnect = false
 
     package init(baseURL: URL) {
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)!
@@ -19,17 +20,19 @@ package actor WebSocketClient {
 
     package func connect(onEvent: @Sendable @escaping (ProcessingEvent) -> Void) {
         self.onEvent = onEvent
+        shouldReconnect = true
         reconnect()
     }
 
     package func disconnect() {
+        shouldReconnect = false
         isConnected = false
         task?.cancel(with: .goingAway, reason: nil)
         task = nil
     }
 
     private func reconnect() {
-        guard !isConnected else { return }
+        guard shouldReconnect, !isConnected else { return }
         let wsTask = session.webSocketTask(with: url)
         self.task = wsTask
         wsTask.resume()
@@ -64,29 +67,12 @@ package actor WebSocketClient {
             receiveLoop(wsTask)
         case .failure:
             isConnected = false
+            guard shouldReconnect else { return }
             // Reconnect after delay
             Task {
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
                 reconnect()
             }
         }
-    }
-}
-
-package struct ProcessingEvent: Sendable, Codable {
-    package let eventType: String
-    package let documentId: UUID
-    package let status: String
-    package let progressPct: Double?
-    package let stageLabel: String?
-    package let errorMessage: String?
-
-    enum CodingKeys: String, CodingKey {
-        case status
-        case eventType = "event_type"
-        case documentId = "document_id"
-        case progressPct = "progress_pct"
-        case stageLabel = "stage_label"
-        case errorMessage = "error_message"
     }
 }

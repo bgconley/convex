@@ -20,6 +20,10 @@ package actor EntityService {
         try await entityRepo.getDetail(id: id)
     }
 
+    package func listEntityTypes() async throws -> [String] {
+        try await entityRepo.listEntityTypes()
+    }
+
     package func getRelated(id: UUID, hops: Int = 2) async throws -> [RelatedEntity] {
         try await entityRepo.getRelated(id: id, hops: hops)
     }

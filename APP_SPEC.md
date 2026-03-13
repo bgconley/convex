@@ -1049,13 +1049,12 @@ class NERService:
     """Named Entity Recognition using GLiNER."""
 
     ENTITY_LABELS = [
-        "person", "organization", "location", "country", "city",
-        "date", "monetary value",
-        "programming language", "software framework", "database",
-        "algorithm", "protocol", "API", "technology",
-        "product", "company", "methodology",
-        "scientific concept", "industry term",
-        "book title", "publication", "conference",
+        "person", "organization", "location", "date",
+        "monetary value", "product", "event",
+        "technology", "software",
+        "medical condition", "medication", "medical procedure",
+        "law", "regulation", "contract term",
+        "financial instrument", "account number", "vehicle",
     ]
 
     def __init__(self, model_name: str = "urchade/gliner_large_v2.5"):

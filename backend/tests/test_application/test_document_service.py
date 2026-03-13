@@ -95,6 +95,10 @@ class FakeDocRepo:
 
 
 class FakeFileStorage:
+    def compute_file_hash(self, file_data: bytes) -> str:
+        import hashlib
+        return hashlib.sha256(file_data).hexdigest()
+
     async def save_original(self, file_data: bytes, document_id: UUID, filename: str) -> str:
         return f"originals/{document_id}/{filename}"
 
@@ -204,3 +208,19 @@ async def test_list_documents_multiple_tags_overlap():
     ids = {d.id for d in result}
     assert d1.id in ids
     assert d2.id in ids
+
+
+@pytest.mark.asyncio
+async def test_update_can_clear_collection_when_field_provided():
+    doc = _make_doc(tags=["ml"])
+    doc.collection_id = uuid4()
+    service = DocumentService(FakeDocRepo([doc]), FakeFileStorage())
+
+    updated = await service.update(
+        doc.id,
+        collection_id=None,
+        collection_id_provided=True,
+    )
+
+    assert updated is not None
+    assert updated.collection_id is None

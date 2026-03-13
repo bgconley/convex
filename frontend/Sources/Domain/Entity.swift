@@ -29,6 +29,14 @@ package struct EntityListResponse: Sendable, Codable {
     package let offset: Int
 }
 
+package struct EntityTypeListResponse: Sendable, Codable {
+    package let entityTypes: [String]
+
+    enum CodingKeys: String, CodingKey {
+        case entityTypes = "entity_types"
+    }
+}
+
 package struct RelatedEntity: Sendable, Equatable, Codable, Identifiable {
     package let name: String
     package let entityType: String

@@ -59,7 +59,9 @@ class PGChunkRepository:
             f"c.start_char, c.end_char, c.section_heading, c.page_number, "
             f"1 - (c.embedding <=> '{vec_str}'::vector) as similarity "
             f"FROM chunks c "
+            f"JOIN documents d ON d.id = c.document_id "
             f"WHERE c.embedding IS NOT NULL "
+            f"AND d.status = 'ready' "
             f"ORDER BY c.embedding <=> '{vec_str}'::vector "
             f"LIMIT {top_k}"
         )

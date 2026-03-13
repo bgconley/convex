@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
+from lxml import html as lxml_html
 
 from cortex.schemas.document_schemas import (
     DocumentContentResponse,
@@ -127,9 +129,22 @@ async def get_document_content(
         )
 
     # Structured view — inject chunk anchors for search-hit navigation
-    if doc.rendered_html:
-        content = await _inject_chunk_anchors(doc.rendered_html, document_id, request)
+    chunk_repo = request.app.state.chunk_repo
+    chunks = await chunk_repo.get_by_document(document_id)
+
+    if doc.file_type.value == "xlsx" and doc.rendered_html:
+        anchored_html = _inject_chunk_anchors(doc.rendered_html, chunks)
+        content = json.dumps(_spreadsheet_html_to_json(anchored_html))
+        fmt = "spreadsheet_json"
+    elif doc.rendered_html:
+        content = _inject_chunk_anchors(doc.rendered_html, chunks)
         fmt = "html"
+    elif doc.file_type.value == "markdown" and doc.rendered_markdown:
+        content = _inject_chunk_anchors_into_text(doc.rendered_markdown, chunks)
+        fmt = "markdown"
+    elif doc.file_type.value == "txt" and doc.rendered_markdown is not None:
+        content = doc.rendered_markdown
+        fmt = "plain_text"
     elif doc.rendered_markdown:
         content = doc.rendered_markdown
         fmt = "markdown"
@@ -146,16 +161,12 @@ async def get_document_content(
     )
 
 
-async def _inject_chunk_anchors(
-    html: str, document_id: UUID, request: Request
-) -> str:
+def _inject_chunk_anchors(html: str, chunks: list) -> str:
     """Inject <span id="chunk-N"> anchors into rendered HTML at chunk boundaries.
 
     This enables search-hit navigation: the frontend scrolls to #chunk-N
     when the user clicks a search result.
     """
-    chunk_repo = request.app.state.chunk_repo
-    chunks = await chunk_repo.get_by_document(document_id)
     if not chunks:
         return html
 
@@ -179,6 +190,95 @@ async def _inject_chunk_anchors(
                 html = anchor + html
 
     return html
+
+
+def _inject_chunk_anchors_into_text(text: str, chunks: list) -> str:
+    """Inject raw HTML anchors into markdown/plain text using chunk start offsets."""
+    if not chunks:
+        return text
+
+    anchored = text
+    for chunk in sorted(chunks, key=lambda c: c.start_char, reverse=True):
+        anchor = f'<span id="chunk-{chunk.chunk_index}"></span>'
+        insert_at = min(max(chunk.start_char, 0), len(anchored))
+        anchored = anchored[:insert_at] + anchor + anchored[insert_at:]
+    return anchored
+
+
+def _spreadsheet_html_to_json(html: str) -> dict:
+    """Convert Docling XLSX HTML into sheet/row/cell JSON for the structured viewer."""
+    try:
+        root = lxml_html.fromstring(html)
+    except Exception:
+        return {"sheets": []}
+
+    body = root.find("body") if root.tag.lower() != "body" else root
+    container = body if body is not None else root
+    children = list(container.iterchildren())
+
+    sheets: list[dict] = []
+    h2_indexes = [
+        idx for idx, child in enumerate(children)
+        if getattr(child, "tag", "").lower() == "h2"
+    ]
+
+    if len(h2_indexes) > 1:
+        for position, start in enumerate(h2_indexes):
+            end = h2_indexes[position + 1] if position + 1 < len(h2_indexes) else len(children)
+            name = _normalize_cell_text(children[start].text_content()) or f"Sheet {position + 1}"
+            section_tables = [
+                table
+                for child in children[start:end]
+                for table in child.xpath(".//table | self::table")
+            ]
+            sheets.append(_build_sheet_payload(name, section_tables))
+        return {"sheets": [sheet for sheet in sheets if sheet["rows"]]}
+
+    captioned_tables = []
+    for table in container.xpath(".//table"):
+        captions = table.xpath("./caption")
+        if captions:
+            captioned_tables.append((captions[0].text_content(), table))
+    if len(captioned_tables) > 1:
+        for caption, table in captioned_tables:
+            sheets.append(
+                _build_sheet_payload(_normalize_cell_text(caption) or "Sheet", [table])
+            )
+        return {"sheets": [sheet for sheet in sheets if sheet["rows"]]}
+
+    tables = container.xpath(".//table")
+    if len(tables) > 1:
+        for index, table in enumerate(tables, start=1):
+            sheets.append(_build_sheet_payload(f"Sheet {index}", [table]))
+        return {"sheets": [sheet for sheet in sheets if sheet["rows"]]}
+
+    if tables:
+        return {"sheets": [_build_sheet_payload("Sheet 1", tables)]}
+
+    return {"sheets": []}
+
+
+def _build_sheet_payload(name: str, tables: list) -> dict:
+    rows: list[dict] = []
+    for table in tables:
+        for row in table.xpath(".//tr"):
+            cells = row.xpath("./th|./td")
+            if not cells:
+                continue
+            row_cells = [_normalize_cell_text(cell.text_content()) for cell in cells]
+            anchor_ids = [anchor_id for anchor_id in row.xpath(".//*[@id]/@id") if anchor_id]
+            rows.append(
+                {
+                    "id": f"{name}-row-{len(rows)}",
+                    "cells": row_cells,
+                    "anchor_ids": anchor_ids,
+                }
+            )
+    return {"name": name, "rows": rows}
+
+
+def _normalize_cell_text(text: str) -> str:
+    return " ".join(text.split())
 
 
 @router.get("/{document_id}/original")
@@ -308,12 +408,17 @@ async def update_document(
     document_id: UUID, body: DocumentUpdateRequest, request: Request
 ):
     doc_service = request.app.state.document_service
+    fields_set = body.model_fields_set
     doc = await doc_service.update(
         document_id,
         title=body.title,
+        title_provided="title" in fields_set,
         tags=body.tags,
+        tags_provided="tags" in fields_set,
         collection_id=body.collection_id,
+        collection_id_provided="collection_id" in fields_set,
         is_favorite=body.is_favorite,
+        is_favorite_provided="is_favorite" in fields_set,
     )
     if doc is None:
         raise HTTPException(status_code=404, detail="Document not found")

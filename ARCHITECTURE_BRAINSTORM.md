@@ -106,18 +106,17 @@
 - spaCy integration via `gliner-spacy`; ONNX export supported
 - **Limitation:** Entities only — no relationship extraction. Need separate model/pipeline for relations
 - **Limitation:** Max ~512 token input (DeBERTa context) — must process chunked text, not full documents
-- Best with specific, granular entity labels (e.g., "programming language" > "technical term")
+- Best with a small, stable cross-domain label set; too many granular labels degrade zero-shot quality
 
 **Entity label strategy for knowledge base:**
 ```python
 labels = [
-    "person", "organization", "location", "country", "city",
-    "date", "monetary value",
-    "programming language", "software framework", "database",
-    "algorithm", "protocol", "API", "technology",
-    "product", "company", "methodology",
-    "scientific concept", "industry term",
-    "book title", "publication", "conference"
+    "person", "organization", "location", "date",
+    "monetary value", "product", "event",
+    "technology", "software",
+    "medical condition", "medication", "medical procedure",
+    "law", "regulation", "contract term",
+    "financial instrument", "account number", "vehicle"
 ]
 ```
 
