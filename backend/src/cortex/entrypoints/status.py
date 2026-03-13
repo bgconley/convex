@@ -1,7 +1,7 @@
 import httpx
 from fastapi import APIRouter, Request
 
-from cortex.schemas.stats_schemas import StatsResponse
+from cortex.schemas.stats_schemas import DashboardResponse, StatsResponse
 
 router = APIRouter()
 
@@ -75,4 +75,33 @@ async def get_stats(request: Request) -> StatsResponse:
         chunk_count=chunk_count,
         entity_count=entity_count,
         total_file_size_bytes=total_size,
+    )
+
+
+@router.get("/dashboard", response_model=DashboardResponse)
+async def get_dashboard(request: Request) -> DashboardResponse:
+    """Aggregated system dashboard: health + stats + processing metrics + search analytics."""
+    settings = request.app.state.settings
+    metrics = request.app.state.metrics
+
+    # Health checks (reuse logic from health_check)
+    health = await health_check(request)
+
+    # Corpus stats
+    doc_repo = request.app.state.doc_repo
+    chunk_repo = request.app.state.chunk_repo
+    entity_repo = request.app.state.entity_repo
+
+    stats = StatsResponse(
+        document_count=await doc_repo.count(),
+        chunk_count=await chunk_repo.count(),
+        entity_count=await entity_repo.count(),
+        total_file_size_bytes=await doc_repo.total_file_size(),
+    )
+
+    return DashboardResponse(
+        health=health,
+        corpus=stats,
+        ingestion=metrics.get_ingestion_metrics(),
+        search=metrics.get_search_metrics(),
     )

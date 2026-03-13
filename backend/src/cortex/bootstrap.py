@@ -4,6 +4,7 @@ from cortex.application.entity_service import EntityService
 from cortex.application.ingestion_service import IngestionService
 from cortex.application.search_service import SearchService
 from cortex.infrastructure.file_storage import LocalFileStorage
+from cortex.infrastructure.metrics_collector import MetricsCollector
 from cortex.infrastructure.ml.chonkie_chunker import ChonkieChunker
 from cortex.infrastructure.ml.docling_parser import DoclingParser
 from cortex.infrastructure.graph.age_repository import AGEGraphRepository
@@ -49,6 +50,9 @@ class CompositionRoot:
         self.collection_repo = PGCollectionRepository(self.session_factory)
         self.graph_repo = AGEGraphRepository(self.session_factory)
 
+        # Metrics (Redis for ingestion cross-process, in-memory for search)
+        self.metrics = MetricsCollector(redis_url=settings.redis_url)
+
         # Application services (depend on ports, not concrete types)
         self.document_service = DocumentService(
             doc_repo=self.doc_repo,
@@ -66,6 +70,7 @@ class CompositionRoot:
             ner=self.ner,
             entity_repo=self.entity_repo,
             graph_repo=self.graph_repo,
+            metrics=self.metrics,
         )
 
         self.entity_service = EntityService(
@@ -90,4 +95,5 @@ class CompositionRoot:
             ner=self.ner,
             graph_search=self.graph_search,
             entity_repo=self.entity_repo,
+            metrics=self.metrics,
         )

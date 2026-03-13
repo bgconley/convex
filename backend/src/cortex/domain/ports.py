@@ -167,3 +167,28 @@ class FileStoragePort(Protocol):
         self, image_data: bytes, document_id: UUID
     ) -> str: ...
     async def delete_document_files(self, document_id: UUID) -> None: ...
+
+
+class MetricsPort(Protocol):
+    """Collects operational metrics (in-memory, lost on restart)."""
+
+    def record_ingestion(
+        self,
+        document_id: UUID,
+        success: bool,
+        total_ms: float,
+        stage_timings: dict[str, float],
+        chunk_count: int = 0,
+        entity_count: int = 0,
+    ) -> None: ...
+
+    def record_search(
+        self,
+        query: str,
+        total_ms: float,
+        result_count: int,
+        component_ms: dict[str, float] | None = None,
+    ) -> None: ...
+
+    def get_ingestion_metrics(self) -> dict: ...
+    def get_search_metrics(self) -> dict: ...

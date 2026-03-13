@@ -14,6 +14,7 @@ from cortex.domain.ports import (
     EmbedderPort,
     EntityRepository,
     GraphSearchPort,
+    MetricsPort,
     NERPort,
     RerankerPort,
 )
@@ -50,6 +51,7 @@ class SearchService:
         ner: NERPort | None = None,
         graph_search: GraphSearchPort | None = None,
         entity_repo: EntityRepository | None = None,
+        metrics: MetricsPort | None = None,
     ) -> None:
         self._embedder = embedder
         self._chunk_repo = chunk_repo
@@ -58,6 +60,7 @@ class SearchService:
         self._ner = ner
         self._graph_search = graph_search
         self._entity_repo = entity_repo
+        self._metrics = metrics
         self._recent_queries: deque[str] = deque(maxlen=self.MAX_RECENT_QUERIES)
 
     async def search(
@@ -76,6 +79,7 @@ class SearchService:
         4. Enrich with document metadata
         """
         start = time.monotonic()
+        component_ms: dict[str, float] = {}
 
         # 1. Parallel retrieval (vector + BM25 + optional graph)
         parsed_bm25_query = self._parse_bm25_query(query)
@@ -87,6 +91,8 @@ class SearchService:
             and self._ner is not None
             and self._graph_search is not None
         )
+
+        t_retrieval = time.monotonic()
         if graph_enabled:
             graph_coro = self._graph_entity_search(query, top_k=50)
             vec_results, bm25_results, graph_results = await asyncio.gather(
@@ -95,6 +101,7 @@ class SearchService:
         else:
             vec_results, bm25_results = await asyncio.gather(vec_coro, bm25_coro)
             graph_results = []
+        component_ms["retrieval"] = (time.monotonic() - t_retrieval) * 1000
 
         # 2. RRF fusion (3-way if graph results present, 2-way otherwise)
         fused = self._rrf_fusion(vec_results, bm25_results, graph_results)
@@ -102,7 +109,9 @@ class SearchService:
         # 3. Neural reranking (optional)
         rerank_scores: dict[UUID, float] = {}
         if rerank and self._reranker and fused:
+            t_rerank = time.monotonic()
             rerank_scores = await self._rerank_candidates(query, fused, top_k)
+            component_ms["rerank"] = (time.monotonic() - t_rerank) * 1000
 
         # 4. If reranked, reorder by rerank score; otherwise keep RRF order
         if rerank_scores:
@@ -162,6 +171,14 @@ class SearchService:
         # Track successful searches for recent query suggestions
         if results:
             self._record_query(query)
+
+        if self._metrics:
+            self._metrics.record_search(
+                query=query,
+                total_ms=elapsed_ms,
+                result_count=len(results),
+                component_ms=component_ms,
+            )
 
         return SearchResponse(
             query=query,

@@ -27,3 +27,7 @@ class Settings(BaseSettings):
     api_host: str = "0.0.0.0"
     api_port: int = 8080
     cors_origins: list[str] = ["*"]
+
+    # Logging
+    log_level: str = "INFO"
+    log_json: bool = True

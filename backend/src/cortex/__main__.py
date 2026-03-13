@@ -13,7 +13,7 @@ def main() -> None:
         app,
         host=settings.api_host,
         port=settings.api_port,
-        log_level="info",
+        log_level=settings.log_level.lower(),
     )
 
 

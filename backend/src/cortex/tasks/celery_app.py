@@ -1,6 +1,7 @@
 import os
 
 from celery import Celery
+from celery.signals import worker_process_init
 
 redis_url = os.environ.get("REDIS_URL", "redis://localhost:6380/0")
 
@@ -24,3 +25,13 @@ app.conf.update(
 app.conf.update(
     include=["cortex.tasks.ingest"],
 )
+
+
+@worker_process_init.connect
+def setup_worker_logging(**kwargs) -> None:
+    """Configure structured JSON logging for Celery worker processes."""
+    from cortex.infrastructure.logging import configure_logging
+    from cortex.settings import Settings
+
+    settings = Settings()
+    configure_logging(level=settings.log_level, json_format=settings.log_json)

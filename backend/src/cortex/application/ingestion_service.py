@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from uuid import UUID
 
@@ -14,6 +15,7 @@ from cortex.domain.ports import (
     EntityRepository,
     FileStoragePort,
     GraphPort,
+    MetricsPort,
     NERPort,
     ParserPort,
 )
@@ -41,6 +43,7 @@ class IngestionService:
         ner: NERPort | None = None,
         entity_repo: EntityRepository | None = None,
         graph_repo: GraphPort | None = None,
+        metrics: MetricsPort | None = None,
     ) -> None:
         self._parser = parser
         self._chunker = chunker
@@ -51,6 +54,7 @@ class IngestionService:
         self._ner = ner
         self._entity_repo = entity_repo
         self._graph_repo = graph_repo
+        self._metrics = metrics
 
     async def ingest(self, document_id: UUID) -> None:
         """Run the full ingestion pipeline for a document.
@@ -63,17 +67,26 @@ class IngestionService:
             raise ValueError(f"Document {document_id} not found")
 
         extractions: list = []  # populated by NER step, used by graph step
+        stage_timings: dict[str, float] = {}
+        chunk_count = 0
+        entity_count = 0
+        pipeline_start = time.monotonic()
 
         try:
             # 1. Parse
             await self._doc_repo.update_status(document_id, ProcessingStatus.PARSING.value)
-            logger.info("Parsing document %s (%s)", document_id, doc.file_type.value)
+            logger.info(
+                "Parsing document %s (%s)", document_id, doc.file_type.value,
+                extra={"document_id": str(document_id)},
+            )
 
+            t0 = time.monotonic()
             file_path = await self._file_storage.get_original_path(document_id)
             if file_path is None:
                 raise FileNotFoundError(f"Original file not found for {document_id}")
 
             parse_result = await self._parser.parse(file_path, doc.file_type.value)
+            stage_timings["parse"] = (time.monotonic() - t0) * 1000
 
             await self._doc_repo.update_status(document_id, ProcessingStatus.PARSED.value)
             logger.info("Parsed: %d chars, %d words", len(parse_result.text), parse_result.metadata.word_count or 0)
@@ -95,13 +108,16 @@ class IngestionService:
             await self._doc_repo.update_status(document_id, ProcessingStatus.CHUNKING.value)
             logger.info("Chunking document %s", document_id)
 
+            t0 = time.monotonic()
             chunk_results = self._chunker.chunk_document(
                 parse_result.text,
                 parse_result.structured,
             )
+            stage_timings["chunk"] = (time.monotonic() - t0) * 1000
 
             await self._doc_repo.update_status(document_id, ProcessingStatus.CHUNKED.value)
-            logger.info("Chunked into %d pieces", len(chunk_results))
+            chunk_count = len(chunk_results)
+            logger.info("Chunked into %d pieces", chunk_count)
 
             # Delete existing chunks (idempotent)
             await self._chunk_repo.delete_by_document(document_id)
@@ -125,11 +141,13 @@ class IngestionService:
             await self._doc_repo.update_status(document_id, ProcessingStatus.EMBEDDING.value)
             logger.info("Embedding %d chunks", len(chunks))
 
+            t0 = time.monotonic()
             texts = [c.chunk_text for c in chunks]
             if texts:
                 vectors = await self._embedder.embed_texts(texts)
                 for chunk, vec in zip(chunks, vectors):
                     chunk.embedding = vec
+            stage_timings["embed"] = (time.monotonic() - t0) * 1000
 
             await self._doc_repo.update_status(document_id, ProcessingStatus.EMBEDDED.value)
             logger.info("Embedded %d chunks", len(chunks))
@@ -144,14 +162,17 @@ class IngestionService:
                 )
                 logger.info("Extracting entities from %d chunks", len(chunks))
 
+                t0 = time.monotonic()
                 extractions = await self._ner.extract_entities(chunks, threshold=0.4)
                 chunk_ids = [c.id for c in chunks]
                 await self._entity_repo.upsert_entities(document_id, extractions, chunk_ids)
+                stage_timings["ner"] = (time.monotonic() - t0) * 1000
 
                 await self._doc_repo.update_status(
                     document_id, ProcessingStatus.ENTITIES_EXTRACTED.value
                 )
-                logger.info("Extracted %d entities", len(extractions))
+                entity_count = len(extractions)
+                logger.info("Extracted %d entities", entity_count)
 
             # 6. Knowledge graph — add document + entities to AGE graph
             if self._graph_repo and extractions:
@@ -160,24 +181,51 @@ class IngestionService:
                 )
                 logger.info("Building knowledge graph for document %s", document_id)
 
+                t0 = time.monotonic()
                 await self._graph_repo.add_document_entities(
                     document_id=document_id,
                     document_title=doc.title,
                     entities=extractions,
                     chunk_ids=[c.id for c in chunks],
                 )
+                stage_timings["graph"] = (time.monotonic() - t0) * 1000
 
                 logger.info("Knowledge graph updated for document %s", document_id)
 
             # 7. Done
             await self._doc_repo.update_status(document_id, ProcessingStatus.READY.value)
-            logger.info("Ingestion complete for document %s", document_id)
+            total_ms = (time.monotonic() - pipeline_start) * 1000
+            logger.info(
+                "Ingestion complete for document %s (%.0fms)",
+                document_id, total_ms,
+                extra={"document_id": str(document_id), "duration_ms": round(total_ms, 1)},
+            )
+
+            if self._metrics:
+                self._metrics.record_ingestion(
+                    document_id=document_id,
+                    success=True,
+                    total_ms=total_ms,
+                    stage_timings=stage_timings,
+                    chunk_count=chunk_count,
+                    entity_count=entity_count,
+                )
 
         except Exception:
+            total_ms = (time.monotonic() - pipeline_start) * 1000
             logger.exception("Ingestion failed for document %s", document_id)
             await self._doc_repo.update_status(
                 document_id,
                 ProcessingStatus.FAILED.value,
                 error_message=f"Ingestion failed: see worker logs",
             )
+            if self._metrics:
+                self._metrics.record_ingestion(
+                    document_id=document_id,
+                    success=False,
+                    total_ms=total_ms,
+                    stage_timings=stage_timings,
+                    chunk_count=chunk_count,
+                    entity_count=entity_count,
+                )
             raise
