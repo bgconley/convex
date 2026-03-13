@@ -70,6 +70,17 @@ package struct SearchResponse: Sendable, Codable {
     }
 }
 
+package struct EntityMention: Sendable, Codable {
+    package let name: String
+    package let entityType: String
+    package let confidence: Double
+
+    enum CodingKeys: String, CodingKey {
+        case name, confidence
+        case entityType = "entity_type"
+    }
+}
+
 package struct SearchResultItem: Sendable, Codable, Identifiable {
     package let chunkId: UUID
     package let documentId: UUID
@@ -81,6 +92,7 @@ package struct SearchResultItem: Sendable, Codable, Identifiable {
     package let pageNumber: Int?
     package let score: Double
     package let scoreBreakdown: ScoreBreakdown
+    package let entities: [EntityMention]
     package let chunkStartChar: Int
     package let chunkEndChar: Int
     package let anchorId: String?
@@ -88,7 +100,7 @@ package struct SearchResultItem: Sendable, Codable, Identifiable {
     package var id: UUID { chunkId }
 
     enum CodingKeys: String, CodingKey {
-        case score
+        case score, entities
         case chunkId = "chunk_id"
         case documentId = "document_id"
         case documentTitle = "document_title"
@@ -135,6 +147,43 @@ package struct DocumentSearchResponse: Sendable, Codable {
         case query, results
         case totalDocuments = "total_documents"
         case searchTimeMs = "search_time_ms"
+    }
+}
+
+package struct SuggestionItem: Sendable, Codable, Identifiable, Equatable {
+    package let value: String
+    package let label: String
+    package let type: String
+    package let id: UUID?
+    package let entityType: String?
+
+    package enum CodingKeys: String, CodingKey {
+        case value, label, type, id
+        case entityType = "entity_type"
+    }
+}
+
+package struct SearchSuggestionsResponse: Sendable, Codable {
+    package let query: String
+    package let recentSearches: [SuggestionItem]
+    package let entities: [SuggestionItem]
+    package let documents: [SuggestionItem]
+
+    package init(
+        query: String,
+        recentSearches: [SuggestionItem],
+        entities: [SuggestionItem],
+        documents: [SuggestionItem]
+    ) {
+        self.query = query
+        self.recentSearches = recentSearches
+        self.entities = entities
+        self.documents = documents
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case query, entities, documents
+        case recentSearches = "recent_searches"
     }
 }
 

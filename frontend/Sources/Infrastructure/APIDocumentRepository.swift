@@ -15,6 +15,12 @@ package struct APIDocumentRepository: DocumentRepositoryPort, Sendable {
             if let ft = f.fileType { queryItems.append("file_type=\(ft)") }
             if let s = f.status { queryItems.append("status=\(s)") }
             if let c = f.collectionId { queryItems.append("collection_id=\(c.uuidString)") }
+            if let tags = f.tags {
+                for tag in tags {
+                    let encoded = tag.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed) ?? tag
+                    queryItems.append("tags=\(encoded)")
+                }
+            }
             queryItems.append("limit=\(f.limit)")
             queryItems.append("offset=\(f.offset)")
         }
@@ -40,19 +46,21 @@ package struct APIDocumentRepository: DocumentRepositoryPort, Sendable {
         try await client.delete("documents/\(id.uuidString)")
     }
 
-    package func update(id: UUID, title: String?, tags: [String]?, isFavorite: Bool?) async throws -> Document {
+    package func update(id: UUID, title: String?, tags: [String]?, isFavorite: Bool?, collectionId: UUID?) async throws -> Document {
         struct UpdateBody: Codable {
             var title: String?
             var tags: [String]?
             var isFavorite: Bool?
+            var collectionId: UUID?
             enum CodingKeys: String, CodingKey {
                 case title, tags
                 case isFavorite = "is_favorite"
+                case collectionId = "collection_id"
             }
         }
         return try await client.patch(
             "documents/\(id.uuidString)",
-            body: UpdateBody(title: title, tags: tags, isFavorite: isFavorite)
+            body: UpdateBody(title: title, tags: tags, isFavorite: isFavorite, collectionId: collectionId)
         )
     }
 }

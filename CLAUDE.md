@@ -38,15 +38,21 @@ Cortex is a personal knowledge base with a native macOS frontend (Swift/SwiftUI)
 - **Step 2.4** — Document-level search: POST /search/documents, chunk aggregation by document
 - **Step 2.5** — Frontend search enhancements: filters (type, date, collection), Passages/Documents toggle, score breakdown tooltip, "More from this document" expansion
 
-### Phase 3: Knowledge Graph & NER (in progress)
+### Phase 3: Knowledge Graph & NER (complete)
 - **Step 3.1** — NER: GLiNER HTTP client (:9002), 18 cross-domain entity labels, entity dedup, ingestion pipeline step
 - **Step 3.2** — Knowledge graph: Apache AGE, Document/Entity nodes, MENTIONS/CO_OCCURS edges, graph cleanup on delete
 - **Step 3.3** — Graph-enhanced search: query NER → entity expansion via CO_OCCURS (1-2 hops) → chunk lookup via entity_mentions → 3-way RRF (w_vec=0.5, w_bm25=0.3, w_graph=0.2), `include_graph` toggle, `graph_score` in response
 - **Step 3.4** — Entity API: GET /entities (paginated, type-filterable), GET /entities/{id} (detail + docs + related), GET /entities/{id}/related, GET /graph/explore, GET /documents/{id}/entities (real data), EntityService, 8 tests
+- **Step 3.5** — Frontend entity browsing: entity chips in document viewer (click → filter library by entity), entity browser sidebar (grouped by type, mention count badges), entity detail view (documents + related entities), entity search suggestions in Cmd+K overlay, EntityDetailView with FlowLayout
+
+### Phase 4: Collections, Spotlight & Polish (in progress)
+- **Step 4.1** — Collections & Organization: CRUD API, nested collections (parent_id, hierarchical sidebar), drag-to-collection, smart collections (filter_json saved queries with server-side fileType+tags filtering), tag autocomplete
+- **Step 4.2** — Spotlight Integration: CoreSpotlight indexing (CSSearchableItem per document with title, content_preview from rendered_markdown[:300], file type, tags + entity names as keywords), full-corpus background indexing on launch (paginated in batches of 100 + concurrent entity fetch via withTaskGroup), incremental indexing on document load (also fetches entities), deindex on delete, Spotlight tap handling (onContinueUserActivity → navigate to document)
+- **Step 4.2.1** — Search Suggestions: `GET /search/suggestions?q=prefix&limit=5` returns 3 categories (recent searches, entity names, document titles). Backend: ILIKE prefix search on entities/documents repos, in-memory recent query tracking (deque, max 50). Frontend: `SearchSuggestionsView.swift` (3-category dropdown), replaced client-side 500-entity preload with server-side suggestions in Cmd+K overlay (shown when no search results yet). **Not yet deployed to GPU server.**
+- **Step 4.3** — Advanced UI Polish: Keyboard shortcuts (Cmd+1/2/3 sidebar sections, Cmd+D toggle favorite), Settings view (Cmd+, with General/Search/Storage tabs, backend URL config, search preferences, `GET /stats` corpus statistics), onboarding (first-launch backend URL config sheet with connection test), dark mode CSS optimization (added link colors, blockquote text, hr borders to both renderers' `@media (prefers-color-scheme: dark)`). **Not yet deployed to GPU server.**
 
 ### Next Step
-- **Step 3.5** — Frontend entity browsing UI
-- Then: Phase 4 (Collections, Spotlight, polish)
+- Step 4.4 (Backup & Restore)
 
 ---
 
@@ -162,6 +168,15 @@ One canonical document per SHA-256 hash. Duplicate upload returns existing docum
 3. Neural reranking via mxbai-rerank-large-v2 (optional, `rerank=true` default)
 4. Score breakdown: `vector_score`, `bm25_score`, `graph_score`, `rerank_score` in response
 5. Document-level search: `POST /search/documents` aggregates by document
+6. Search suggestions: `GET /search/suggestions?q=prefix&limit=5` returns recent queries (in-memory), entity names (ILIKE), document titles (ILIKE) — 3 categories, up to `limit` per category
+
+### Entity API
+- `GET /entities` — paginated list, filterable by `entity_type`, sorted by mention_count desc
+- `GET /entities/{id}` — entity detail + documents (from graph MENTIONS) + related entities (from graph CO_OCCURS)
+- `GET /entities/{id}/related` — related entities via CO_OCCURS traversal, configurable `hops` (1-4, default 2)
+- `GET /graph/explore` — graph exploration from a starting entity (center + related + documents)
+- `GET /documents/{id}/entities` — entities extracted from a specific document (from relational entity_mentions)
+- Entity `document_count` comes from relational store (entity_mentions); document list in detail/explore comes from graph MENTIONS edges. These can drift — see Knowledge Graph caveat below.
 
 ### Search Hit Navigation
 Search results include `page_number`, `chunk_start_char`, `chunk_end_char`, and `anchor_id`. Structured views inject `<span id="chunk-N">` anchors. PDFs scroll to page; HTML/structured views scroll to anchor.
@@ -171,6 +186,17 @@ Search results include `page_number`, `chunk_start_char`, `chunk_end_char`, and 
 - Nodes: `Document` (doc_id, title), `Entity` (normalized_name, type, name)
 - Edges: `MENTIONS` (Document→Entity, count, confidence), `CO_OCCURS` (Entity→Entity, count)
 - Document deletion cleans up graph nodes (orphans removed) and entity mention counts
+- **Data consistency caveat**: Entity `document_count` (relational, from `entity_mentions` table) and graph `MENTIONS` edges can drift. Steps 3.1 (NER/relational) and 3.2 (graph) were deployed incrementally — documents ingested between steps have relational mentions but no graph edges. Reprocessing affected documents would re-sync.
+
+### Collections & Smart Collections
+- Manual collections: CRUD via `POST/GET/PATCH/DELETE /collections`, documents assigned via `collection_id` FK on documents table
+- Nested collections: `parent_id` self-reference on collections table, frontend renders hierarchically with `DisclosureGroup`
+- Smart collections: `filter_json` JSONB column stores `{query?, file_type?, tags?}`. `is_smart` is computed (`filter_json IS NOT NULL`)
+- Smart collection document population: frontend loads all docs (`limit: 500`), filters client-side by `fileType`/`tags`, and if `query` is set, calls `searchDocuments(topK: 200)` to get matching IDs
+- Drag-to-collection: documents are `.draggable(id.uuidString)`, collection sidebar rows use `.dropDestination(for: String.self)`
+- Smart collections are excluded from drag-drop targets and "Move to Collection" context menus
+- Tag autocomplete: `GET /documents/tags/all` returns distinct tags, `DocumentDetailView` shows dropdown with prefix filtering and keyboard navigation
+- Alembic migration `b2c3d4e5f6a7` adds `filter_json` column
 
 ### NER Entity Labels
 18 cross-domain zero-shot labels for GLiNER: person, organization, location, date, monetary value, product, event, technology, software, medical condition, medication, medical procedure, law, regulation, contract term, financial instrument, account number, vehicle.
@@ -280,3 +306,15 @@ docker compose exec -T api python - < ../backend/tests/test_ingestion_inspect.py
 - **nvidia-persistenced**: GPU containers need this daemon running. If missing: `sudo systemctl start nvidia-persistenced && sudo nvidia-smi -pm 1`. Cannot `enable` (no Install section) — must `start`.
 - **Inspection scripts in container**: Inspection tests piped via stdin (`docker compose exec -T api python - < ../backend/tests/foo.py`) always run the host's current copy. Running directly inside the container (`docker exec cortex-api python /app/tests/foo.py`) runs the copy baked at build time, which may be stale if no rebuild was done after a test-only commit.
 - **Graph search query NER**: Uses a dummy `Chunk` wrapper to call `NERPort.extract_entities()` with query text. Threshold is 0.3 (lower than ingestion's 0.4) to catch more entity mentions in short queries. If NER or graph expansion fails, graph signal is silently skipped (returns empty list).
+- **Entity count drift (relational vs graph)**: Entity `document_count` (relational, from `entity_mentions`) and graph `MENTIONS` edges can disagree. Steps 3.1 and 3.2 were deployed incrementally — documents ingested between them have relational mentions but no graph edges. In entity detail, `document_count` may exceed the length of the `documents` list. Fix: reprocess affected documents via `POST /documents/{id}/reprocess`.
+- **Entity filter library reset**: Clicking an entity chip always resets sidebar to "All Documents" before applying the entity filter. ContentView owns filter lifecycle — `sidebarSelectionBinding` clears entity filter on user sidebar clicks, but `filterLibraryByEntity` sets sidebar directly (bypassing the binding) so the filter persists.
+- **Search suggestions in-memory**: Recent search queries are tracked in-memory in `SearchService` (max 50, deque). Lost on API restart — acceptable for personal KB. Entity and document prefix suggestions are server-side via ILIKE queries.
+- **Smart collection filter_json**: Smart collections store a `filter_json` JSONB column on the `collections` table (`query`, `file_type`, `tags`). `fileType` and `tags` filtering is server-side (`GET /documents` supports `tags` query param via PostgreSQL ARRAY overlap). Only `query`-based smart collections do client-side ID intersection with search results. Non-query smart collections use default server-side pagination (no arbitrary cap). Query-based smart collections use server-side `fileType`+`tags` with `limit: 500`, then intersect with `searchDocuments(topK: 200)` result IDs. A collection with non-null `filter_json` is "smart" (`is_smart=true`). Smart collections reject drag-drop and are excluded from "Move to Collection" context menus.
+- **Recursive sidebar DisclosureGroup**: `collectionRow()` returns `AnyView` because SwiftUI can't infer opaque return types for self-referencing `@ViewBuilder` functions. This is a compiler limitation — not a design choice.
+- **PATCH encoding latent issue**: Swift's `JSONEncoder` encodes `nil` optionals as JSON `null`, so all fields in PATCH body structs appear in the request. Pydantic's `model_fields_set` sees them all. Currently harmless because collection `update()` is not called from UI yet (only create/delete). If collection editing is added, use `encodeIfPresent` or custom encoding.
+- **Spotlight content_preview source**: `content_preview` in `DocumentMetadataResponse` is populated from `rendered_markdown[:300]`, not `parsed_content` (which is `dict | None`). Documents that have no `rendered_markdown` (e.g., still processing, or images with no OCR text) will have `content_preview: null` and Spotlight falls back to a metadata summary (file type, page/word count).
+- **Spotlight indexing concurrency**: Both the full-corpus launch pass (`ContentView.indexAllDocumentsInSpotlight`) and incremental library pass (`DocumentLibraryView.loadDocuments`) fetch entity names per document via unbounded `withTaskGroup`. For very large corpora this could spike concurrent API calls. Acceptable for a personal KB (<1000 docs).
+- **SwiftUI.Settings vs Bootstrap.Settings**: Both SwiftUI and Bootstrap define `Settings`. In CortexApp target, use `Bootstrap.Settings` for the config struct and `SwiftUI.Settings` for the Settings scene. SettingsView.swift takes `Bootstrap.Settings` explicitly.
+- **Settings save requires restart**: Changing the backend URL in Settings saves to UserDefaults but doesn't reinitialize the CompositionRoot. The user must restart the app for URL changes to take effect. Search preferences (topK, rerank, includeGraph) are read from `root.settings` at overlay construction time — changes take effect after app restart.
+- **Onboarding skippable**: First-launch onboarding shows if `backendURL` hasn't been explicitly set in UserDefaults. "Use Default" saves the default URL to UserDefaults and dismisses. Once any URL is saved (including via Settings or skip), onboarding won't show again.
+- **Hidden keyboard shortcut buttons**: Cmd+1/2/3 and Cmd+D are implemented as hidden zero-size `Button` views in a `.background` overlay. This pattern avoids conflicts with macOS native tab switching.

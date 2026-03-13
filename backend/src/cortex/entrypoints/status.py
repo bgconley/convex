@@ -1,6 +1,8 @@
 import httpx
 from fastapi import APIRouter, Request
 
+from cortex.schemas.stats_schemas import StatsResponse
+
 router = APIRouter()
 
 
@@ -55,3 +57,22 @@ async def health_check(request: Request) -> dict:
         "status": "healthy" if all_healthy else "degraded",
         "checks": checks,
     }
+
+
+@router.get("/stats", response_model=StatsResponse)
+async def get_stats(request: Request) -> StatsResponse:
+    doc_repo = request.app.state.doc_repo
+    chunk_repo = request.app.state.chunk_repo
+    entity_repo = request.app.state.entity_repo
+
+    doc_count = await doc_repo.count()
+    chunk_count = await chunk_repo.count()
+    entity_count = await entity_repo.count()
+    total_size = await doc_repo.total_file_size()
+
+    return StatsResponse(
+        document_count=doc_count,
+        chunk_count=chunk_count,
+        entity_count=entity_count,
+        total_file_size_bytes=total_size,
+    )

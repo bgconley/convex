@@ -11,4 +11,8 @@ package struct APIHealthRepository: HealthPort, Sendable {
     package func checkHealth() async throws -> HealthStatus {
         try await client.get("health")
     }
+
+    package func fetchStats() async throws -> SystemStats {
+        try await client.get("stats")
+    }
 }

@@ -89,6 +89,14 @@ class PGChunkRepository:
         adapter = BM25SearchAdapter(self._session_factory)
         return await adapter.search(query, top_k=top_k)
 
+    async def count(self) -> int:
+        from sqlalchemy import func
+
+        async with self._session_factory() as session:
+            stmt = select(func.count(ChunkRow.id))
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
     @staticmethod
     def _to_domain(row: ChunkRow) -> Chunk:
         return Chunk(

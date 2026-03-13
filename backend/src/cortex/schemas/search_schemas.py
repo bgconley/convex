@@ -78,3 +78,18 @@ class DocumentSearchResponse(BaseModel):
     results: list[DocumentSearchResultResponse]
     total_documents: int
     search_time_ms: float
+
+
+class SuggestionItem(BaseModel):
+    value: str
+    label: str
+    type: str
+    id: UUID | None = None
+    entity_type: str | None = None
+
+
+class SearchSuggestionsResponse(BaseModel):
+    query: str
+    recent_searches: list[SuggestionItem]
+    entities: list[SuggestionItem]
+    documents: list[SuggestionItem]

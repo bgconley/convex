@@ -40,8 +40,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ingestion_service = root.ingestion_service
     app.state.search_service = root.search_service
     app.state.entity_service = root.entity_service
+    app.state.collection_service = root.collection_service
     app.state.file_storage = root.file_storage
     app.state.chunk_repo = root.chunk_repo
+    app.state.doc_repo = root.doc_repo
+    app.state.entity_repo = root.entity_repo
 
     from cortex.entrypoints.router import api_router
 

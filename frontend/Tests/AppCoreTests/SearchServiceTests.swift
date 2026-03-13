@@ -26,6 +26,15 @@ final class FakeSearchRepo: SearchPort, @unchecked Sendable {
             searchTimeMs: 1.0
         )
     }
+
+    func suggestions(query: String, limit: Int) async throws -> SearchSuggestionsResponse {
+        SearchSuggestionsResponse(
+            query: query,
+            recentSearches: [],
+            entities: [],
+            documents: []
+        )
+    }
 }
 
 final class SearchServiceTests: XCTestCase {

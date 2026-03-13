@@ -60,11 +60,15 @@ body {
     color: #1d1d1f;
     background: #ffffff;
 }
+a { color: #0066cc; text-decoration: none; }
+a:hover { text-decoration: underline; }
 @media (prefers-color-scheme: dark) {
     body { color: #f5f5f7; background: #1d1d1f; }
     a { color: #2997ff; }
     code, pre { background: #2d2d2f; }
     table, th, td { border-color: #48484a; }
+    blockquote { border-left-color: #48484a; color: #98989d; }
+    hr { border-top-color: #48484a; }
 }
 table { border-collapse: collapse; width: 100%; margin: 1em 0; }
 th, td { border: 1px solid #d1d1d6; padding: 8px 12px; text-align: left; }
@@ -72,4 +76,6 @@ th { font-weight: 600; }
 img { max-width: 100%; height: auto; }
 pre { overflow-x: auto; padding: 16px; background: #f5f5f7; border-radius: 8px; }
 code { font-family: "SF Mono", Menlo, monospace; font-size: 0.9em; }
+blockquote { margin: 1em 0; padding: 0.5em 1em; border-left: 4px solid #d1d1d6; color: #86868b; }
+hr { border: none; border-top: 1px solid #d1d1d6; margin: 2em 0; }
 """

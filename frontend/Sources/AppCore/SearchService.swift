@@ -9,13 +9,29 @@ package actor SearchService {
         self.searchRepo = searchRepo
     }
 
-    package func search(query: String, topK: Int = 10, filters: SearchFilters? = nil) async throws -> SearchResponse {
-        let request = SearchRequest(query: query, topK: topK, filters: filters)
+    package func search(
+        query: String,
+        topK: Int = 10,
+        filters: SearchFilters? = nil,
+        rerank: Bool = true,
+        includeGraph: Bool = true
+    ) async throws -> SearchResponse {
+        var request = SearchRequest(query: query, topK: topK, filters: filters)
+        request.rerank = rerank
+        request.includeGraph = includeGraph
         return try await searchRepo.search(request: request)
     }
 
-    package func searchDocuments(query: String, topK: Int = 10, filters: SearchFilters? = nil) async throws -> DocumentSearchResponse {
-        let request = SearchRequest(query: query, topK: topK, filters: filters)
+    package func searchDocuments(
+        query: String,
+        topK: Int = 10,
+        filters: SearchFilters? = nil,
+        rerank: Bool = true,
+        includeGraph: Bool = true
+    ) async throws -> DocumentSearchResponse {
+        var request = SearchRequest(query: query, topK: topK, filters: filters)
+        request.rerank = rerank
+        request.includeGraph = includeGraph
         return try await searchRepo.searchDocuments(request: request)
     }
 
@@ -23,6 +39,8 @@ package actor SearchService {
         query: String,
         topK: Int = 10,
         filters: SearchFilters? = nil,
+        rerank: Bool = true,
+        includeGraph: Bool = true,
         delayMs: UInt64 = 300,
         onResult: @Sendable @escaping (Result<DocumentSearchResponse, Error>) -> Void
     ) {
@@ -31,7 +49,7 @@ package actor SearchService {
             do {
                 try await Task.sleep(nanoseconds: delayMs * 1_000_000)
                 guard !Task.isCancelled else { return }
-                let result = try await searchDocuments(query: query, topK: topK, filters: filters)
+                let result = try await searchDocuments(query: query, topK: topK, filters: filters, rerank: rerank, includeGraph: includeGraph)
                 onResult(.success(result))
             } catch is CancellationError {
                 // Debounce cancelled — expected
@@ -39,6 +57,10 @@ package actor SearchService {
                 onResult(.failure(error))
             }
         }
+    }
+
+    package func suggestions(query: String, limit: Int = 5) async throws -> SearchSuggestionsResponse {
+        try await searchRepo.suggestions(query: query, limit: limit)
     }
 
     package func cancelPendingSearch() {
@@ -51,6 +73,8 @@ package actor SearchService {
         query: String,
         topK: Int = 10,
         filters: SearchFilters? = nil,
+        rerank: Bool = true,
+        includeGraph: Bool = true,
         delayMs: UInt64 = 300,
         onResult: @Sendable @escaping (Result<SearchResponse, Error>) -> Void
     ) {
@@ -59,7 +83,7 @@ package actor SearchService {
             do {
                 try await Task.sleep(nanoseconds: delayMs * 1_000_000)
                 guard !Task.isCancelled else { return }
-                let result = try await search(query: query, topK: topK, filters: filters)
+                let result = try await search(query: query, topK: topK, filters: filters, rerank: rerank, includeGraph: includeGraph)
                 onResult(.success(result))
             } catch is CancellationError {
                 // Debounce cancelled — expected

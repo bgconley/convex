@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, UploadFile
+from fastapi import APIRouter, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 
 from cortex.schemas.document_schemas import (
@@ -18,6 +18,9 @@ router = APIRouter()
 
 
 def _doc_to_response(doc) -> DocumentMetadataResponse:
+    preview = None
+    if doc.rendered_markdown:
+        preview = doc.rendered_markdown[:300].strip()
     return DocumentMetadataResponse(
         id=doc.id,
         title=doc.title,
@@ -33,6 +36,7 @@ def _doc_to_response(doc) -> DocumentMetadataResponse:
         tags=doc.tags,
         is_favorite=doc.is_favorite,
         collection_id=doc.collection_id,
+        content_preview=preview,
         created_at=doc.created_at,
         updated_at=doc.updated_at,
         processed_at=doc.processed_at,
@@ -69,6 +73,7 @@ async def list_documents(
     file_type: str | None = None,
     status: str | None = None,
     collection_id: UUID | None = None,
+    tags: list[str] | None = Query(None),
     limit: int = 50,
     offset: int = 0,
 ):
@@ -77,6 +82,7 @@ async def list_documents(
         file_type=file_type,
         status=status,
         collection_id=collection_id,
+        tags=tags,
         limit=limit,
         offset=offset,
     )
@@ -262,6 +268,14 @@ async def get_document_entities(document_id: UUID, request: Request):
             for e in entities
         ]
     }
+
+
+@router.get("/tags/all")
+async def list_all_tags(request: Request):
+    """Return all distinct tags across all documents, for autocomplete."""
+    doc_service = request.app.state.document_service
+    tags = await doc_service.list_tags()
+    return {"tags": tags}
 
 
 @router.post("/{document_id}/reprocess")

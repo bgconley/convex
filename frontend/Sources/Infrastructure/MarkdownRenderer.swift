@@ -47,8 +47,9 @@ package struct MarkdownRenderer: Sendable {
         a { color: #2997ff; }
         code { background: #2d2d2f; }
         pre { background: #2d2d2f; }
-        blockquote { border-left-color: #48484a; }
+        blockquote { border-left-color: #48484a; color: #98989d; }
         table, th, td { border-color: #48484a; }
+        hr { border-top-color: #48484a; }
     }
     h1, h2, h3, h4, h5, h6 {
         margin-top: 1.4em;

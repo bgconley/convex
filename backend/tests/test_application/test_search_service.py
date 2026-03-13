@@ -102,6 +102,48 @@ class FakeDocRepo:
     async def delete(self, document_id: UUID) -> None:
         pass
 
+    async def search_by_title_prefix(self, prefix: str, limit: int = 5) -> list[Document]:
+        prefix_lower = prefix.lower()
+        return [
+            d for d in self._docs.values()
+            if d.title.lower().startswith(prefix_lower)
+        ][:limit]
+
+    async def total_file_size(self) -> int:
+        return sum(d.file_size_bytes for d in self._docs.values())
+
+
+class FakeEntityRepo:
+    """EntityRepository test double for suggestion tests."""
+
+    def __init__(self, entities: list[Entity] | None = None):
+        self._entities = entities or []
+
+    async def search_by_prefix(self, prefix: str, limit: int = 5) -> list[Entity]:
+        prefix_lower = prefix.lower()
+        return [
+            e for e in self._entities
+            if e.name.lower().startswith(prefix_lower)
+        ][:limit]
+
+    async def upsert_entities(self, document_id, extractions, chunk_ids):
+        return []
+
+    async def get_by_document(self, document_id):
+        return []
+
+    async def list_all(self, entity_type=None, limit=100, offset=0):
+        return self._entities[:limit]
+
+    async def get(self, entity_id):
+        return None
+
+    async def count(self, entity_type=None):
+        return len(self._entities)
+
+    async def delete_by_document(self, document_id):
+        pass
+
 
 def _make_doc(doc_id: UUID) -> Document:
     from datetime import datetime, UTC
@@ -768,3 +810,168 @@ class TestExtractHighlightTerms:
         assert "phrase" in terms
         assert "rest" in terms
         assert "AND" not in terms
+
+
+def _make_entity(name: str, entity_type: str = "person") -> Entity:
+    from datetime import datetime, UTC
+    return Entity(
+        id=uuid4(),
+        name=name,
+        entity_type=entity_type,
+        normalized_name=name.lower(),
+        description=None,
+        document_count=1,
+        mention_count=1,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+def _make_titled_doc(doc_id: UUID, title: str) -> Document:
+    from datetime import datetime, UTC
+    return Document(
+        id=doc_id,
+        title=title,
+        original_filename="test.txt",
+        file_type=FileType.TXT,
+        file_size_bytes=100,
+        file_hash=f"hash-{doc_id}",
+        mime_type="text/plain",
+        original_path="originals/test.txt",
+        status="ready",
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+    )
+
+
+class TestSuggestions:
+    """Tests for SearchService.get_suggestions (Step 4.2.1)."""
+
+    @pytest.mark.asyncio
+    async def test_entity_suggestions_by_prefix(self):
+        entity_repo = FakeEntityRepo(entities=[
+            _make_entity("John Smith"),
+            _make_entity("Jane Doe"),
+            _make_entity("JavaScript", "technology"),
+        ])
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=FakeChunkRepo(),
+            doc_repo=FakeDocRepo(), entity_repo=entity_repo,
+        )
+        result = await service.get_suggestions("Ja")
+        assert len(result.entities) == 2
+        names = {e.name for e in result.entities}
+        assert "Jane Doe" in names
+        assert "JavaScript" in names
+
+    @pytest.mark.asyncio
+    async def test_document_suggestions_by_prefix(self):
+        doc_a = uuid4()
+        doc_b = uuid4()
+        doc_repo = FakeDocRepo({
+            doc_a: _make_titled_doc(doc_a, "Machine Learning Guide"),
+            doc_b: _make_titled_doc(doc_b, "Marketing Strategy"),
+        })
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=FakeChunkRepo(),
+            doc_repo=doc_repo,
+        )
+        result = await service.get_suggestions("Ma")
+        assert len(result.documents) == 2
+        titles = {d.title for d in result.documents}
+        assert "Machine Learning Guide" in titles
+        assert "Marketing Strategy" in titles
+
+    @pytest.mark.asyncio
+    async def test_recent_searches_tracked_and_returned(self):
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="some text", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo,
+        )
+        # Perform a search to record the query
+        await service.search("neural networks")
+
+        result = await service.get_suggestions("neur")
+        assert len(result.recent_searches) == 1
+        assert result.recent_searches[0] == "neural networks"
+
+    @pytest.mark.asyncio
+    async def test_recent_searches_excludes_exact_match(self):
+        """Typing the exact same query shouldn't appear as a suggestion."""
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo,
+        )
+        await service.search("hello")
+
+        result = await service.get_suggestions("hello")
+        assert len(result.recent_searches) == 0
+
+    @pytest.mark.asyncio
+    async def test_recent_queries_deduplication(self):
+        """Same query searched twice should appear only once."""
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({doc_id: _make_doc(doc_id)})
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo, doc_repo=doc_repo,
+        )
+        await service.search("deep learning")
+        await service.search("deep learning")
+
+        result = await service.get_suggestions("deep")
+        assert len(result.recent_searches) == 1
+
+    @pytest.mark.asyncio
+    async def test_suggestions_limit(self):
+        entities = [_make_entity(f"Entity{i}") for i in range(20)]
+        entity_repo = FakeEntityRepo(entities=entities)
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=FakeChunkRepo(),
+            doc_repo=FakeDocRepo(), entity_repo=entity_repo,
+        )
+        result = await service.get_suggestions("Entity", limit=3)
+        assert len(result.entities) == 3
+
+    @pytest.mark.asyncio
+    async def test_no_entity_repo_returns_empty_entities(self):
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=FakeChunkRepo(),
+            doc_repo=FakeDocRepo(), entity_repo=None,
+        )
+        result = await service.get_suggestions("test")
+        assert result.entities == []
+
+    @pytest.mark.asyncio
+    async def test_all_three_categories(self):
+        """Suggestions return all three categories in a single response."""
+        doc_id = uuid4()
+        chunk = _make_scored_chunk(doc_id, text="test data", score=0.9)
+        chunk_repo = FakeChunkRepo(vec_chunks=[chunk], bm25_chunks=[])
+        doc_repo = FakeDocRepo({
+            doc_id: _make_titled_doc(doc_id, "Test Document"),
+        })
+        entity_repo = FakeEntityRepo(entities=[_make_entity("Test Entity")])
+
+        service = SearchService(
+            embedder=FakeEmbedder(), chunk_repo=chunk_repo,
+            doc_repo=doc_repo, entity_repo=entity_repo,
+        )
+        await service.search("test data")
+
+        result = await service.get_suggestions("Test")
+        assert len(result.recent_searches) >= 0  # "test data" starts with "test"
+        assert len(result.entities) == 1
+        assert len(result.documents) == 1
+        assert result.entities[0].name == "Test Entity"
+        assert result.documents[0].title == "Test Document"

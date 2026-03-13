@@ -15,4 +15,9 @@ package struct APISearchRepository: SearchPort, Sendable {
     package func searchDocuments(request: SearchRequest) async throws -> DocumentSearchResponse {
         try await client.post("search/documents", body: request)
     }
+
+    package func suggestions(query: String, limit: Int) async throws -> SearchSuggestionsResponse {
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryValueAllowed) ?? query
+        return try await client.get("search/suggestions?q=\(encoded)&limit=\(limit)")
+    }
 }

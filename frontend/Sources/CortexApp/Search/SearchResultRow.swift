@@ -29,6 +29,14 @@ struct SearchResultRow: View {
                     .lineLimit(3)
                     .foregroundStyle(.primary)
 
+                if !item.entities.isEmpty {
+                    HStack(spacing: 4) {
+                        ForEach(Array(item.entities.prefix(5).enumerated()), id: \.offset) { _, mention in
+                            EntityChipView(name: mention.name, entityType: mention.entityType)
+                        }
+                    }
+                }
+
                 HStack(spacing: 12) {
                     scoreLabel
                         .help(scoreTooltip)

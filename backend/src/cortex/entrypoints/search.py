@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from cortex.schemas.search_schemas import (
     DocumentSearchResponse,
@@ -9,6 +9,8 @@ from cortex.schemas.search_schemas import (
     SearchRequest,
     SearchResponse,
     SearchResultResponse,
+    SearchSuggestionsResponse,
+    SuggestionItem,
 )
 
 router = APIRouter()
@@ -91,4 +93,36 @@ async def search_documents(body: SearchRequest, request: Request):
         ],
         total_documents=result.total_documents,
         search_time_ms=result.search_time_ms,
+    )
+
+
+@router.get("/suggestions", response_model=SearchSuggestionsResponse)
+async def search_suggestions(
+    request: Request,
+    q: str = Query(min_length=2, description="Search prefix"),
+    limit: int = Query(default=5, ge=1, le=10),
+):
+    """Return search suggestions matching a prefix from recent queries, entities, and documents."""
+    search_service = request.app.state.search_service
+    result = await search_service.get_suggestions(prefix=q, limit=limit)
+
+    return SearchSuggestionsResponse(
+        query=result.query,
+        recent_searches=[
+            SuggestionItem(value=q_str, label=q_str, type="recent")
+            for q_str in result.recent_searches
+        ],
+        entities=[
+            SuggestionItem(
+                value=e.name, label=e.name, type="entity",
+                id=e.id, entity_type=e.entity_type,
+            )
+            for e in result.entities
+        ],
+        documents=[
+            SuggestionItem(
+                value=d.title, label=d.title, type="document", id=d.id,
+            )
+            for d in result.documents
+        ],
     )

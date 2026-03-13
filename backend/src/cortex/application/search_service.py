@@ -6,10 +6,13 @@ import time
 from uuid import UUID, uuid4
 
 from cortex.domain.chunk import Chunk, ScoredChunk
+from collections import deque
+
 from cortex.domain.ports import (
     ChunkRepository,
     DocumentRepository,
     EmbedderPort,
+    EntityRepository,
     GraphSearchPort,
     NERPort,
     RerankerPort,
@@ -36,6 +39,8 @@ class SearchService:
     RRF_W_BM25_GRAPH = 0.3
     RRF_W_GRAPH = 0.2
 
+    MAX_RECENT_QUERIES = 50
+
     def __init__(
         self,
         embedder: EmbedderPort,
@@ -44,6 +49,7 @@ class SearchService:
         reranker: RerankerPort | None = None,
         ner: NERPort | None = None,
         graph_search: GraphSearchPort | None = None,
+        entity_repo: EntityRepository | None = None,
     ) -> None:
         self._embedder = embedder
         self._chunk_repo = chunk_repo
@@ -51,6 +57,8 @@ class SearchService:
         self._reranker = reranker
         self._ner = ner
         self._graph_search = graph_search
+        self._entity_repo = entity_repo
+        self._recent_queries: deque[str] = deque(maxlen=self.MAX_RECENT_QUERIES)
 
     async def search(
         self,
@@ -151,12 +159,66 @@ class SearchService:
 
         elapsed_ms = (time.monotonic() - start) * 1000
 
+        # Track successful searches for recent query suggestions
+        if results:
+            self._record_query(query)
+
         return SearchResponse(
             query=query,
             results=results,
             total_candidates=len(fused),
             search_time_ms=elapsed_ms,
         )
+
+    async def get_suggestions(
+        self, prefix: str, limit: int = 5,
+    ) -> SuggestionsResult:
+        """Return search suggestions matching prefix from 3 sources."""
+        prefix_lower = prefix.lower()
+
+        # Recent searches matching prefix
+        recent = [
+            q for q in self._recent_queries
+            if q.lower().startswith(prefix_lower) and q.lower() != prefix_lower
+        ][:limit]
+
+        # Entity names matching prefix
+        entities: list[EntitySuggestion] = []
+        if self._entity_repo:
+            matched = await self._entity_repo.search_by_prefix(prefix, limit=limit)
+            entities = [
+                EntitySuggestion(
+                    id=e.id, name=e.name, entity_type=e.entity_type,
+                )
+                for e in matched
+            ]
+
+        # Document titles matching prefix
+        documents: list[DocumentSuggestion] = []
+        matched_docs = await self._doc_repo.search_by_title_prefix(prefix, limit=limit)
+        documents = [
+            DocumentSuggestion(id=d.id, title=d.title)
+            for d in matched_docs
+        ]
+
+        return SuggestionsResult(
+            query=prefix,
+            recent_searches=recent,
+            entities=entities,
+            documents=documents,
+        )
+
+    def _record_query(self, query: str) -> None:
+        """Record a search query for recent suggestions (deduped)."""
+        normalized = query.strip()
+        if not normalized:
+            return
+        # Remove existing instance to move it to front
+        try:
+            self._recent_queries.remove(normalized)
+        except ValueError:
+            pass
+        self._recent_queries.appendleft(normalized)
 
     async def _rerank_candidates(
         self, query: str, fused: list[FusedChunk], top_k: int
@@ -252,9 +314,11 @@ class SearchService:
         """
         start = time.monotonic()
 
-        # Run chunk-level search with a higher top_k to get good coverage
+        # Run chunk-level search with scaled top_k for good document coverage.
+        # More chunks retrieved → more unique documents in the aggregation.
+        chunk_top_k = min(top_k * 5, 200)
         chunk_response = await self.search(
-            query=query, top_k=50, file_type=file_type, rerank=rerank,
+            query=query, top_k=chunk_top_k, file_type=file_type, rerank=rerank,
             include_graph=include_graph,
         )
 
@@ -557,3 +621,36 @@ class DocumentSearchResponse:
         self.results = results
         self.total_documents = total_documents
         self.search_time_ms = search_time_ms
+
+
+class EntitySuggestion:
+    __slots__ = ("id", "name", "entity_type")
+
+    def __init__(self, id: UUID, name: str, entity_type: str):
+        self.id = id
+        self.name = name
+        self.entity_type = entity_type
+
+
+class DocumentSuggestion:
+    __slots__ = ("id", "title")
+
+    def __init__(self, id: UUID, title: str):
+        self.id = id
+        self.title = title
+
+
+class SuggestionsResult:
+    __slots__ = ("query", "recent_searches", "entities", "documents")
+
+    def __init__(
+        self,
+        query: str,
+        recent_searches: list[str],
+        entities: list[EntitySuggestion],
+        documents: list[DocumentSuggestion],
+    ):
+        self.query = query
+        self.recent_searches = recent_searches
+        self.entities = entities
+        self.documents = documents

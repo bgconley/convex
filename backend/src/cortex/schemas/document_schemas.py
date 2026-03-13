@@ -28,6 +28,7 @@ class DocumentMetadataResponse(BaseModel):
     tags: list[str] = []
     is_favorite: bool = False
     collection_id: UUID | None = None
+    content_preview: str | None = None
     created_at: datetime
     updated_at: datetime
     processed_at: datetime | None = None

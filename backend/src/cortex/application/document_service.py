@@ -116,6 +116,7 @@ class DocumentService:
         file_type: str | None = None,
         status: str | None = None,
         collection_id: UUID | None = None,
+        tags: list[str] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[Document], int]:
@@ -123,6 +124,7 @@ class DocumentService:
             file_type=file_type,
             status=status,
             collection_id=collection_id,
+            tags=tags,
             limit=limit,
             offset=offset,
         )
@@ -130,6 +132,7 @@ class DocumentService:
             file_type=file_type,
             status=status,
             collection_id=collection_id,
+            tags=tags,
         )
         return docs, total
 
@@ -154,6 +157,9 @@ class DocumentService:
             doc.is_favorite = is_favorite
         await self._doc_repo.update(doc)
         return doc
+
+    async def list_tags(self) -> list[str]:
+        return await self._doc_repo.distinct_tags()
 
     async def delete(self, document_id: UUID) -> bool:
         doc = await self._doc_repo.get(document_id)

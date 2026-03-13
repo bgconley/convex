@@ -4,6 +4,9 @@ import AppCore
 
 struct SearchOverlayView: View {
     let searchService: SearchService
+    let defaultTopK: Int
+    let defaultRerank: Bool
+    let defaultIncludeGraph: Bool
     let onSelectResult: (SearchResultItem) -> Void
     let onSelectDocument: (DocumentSearchResultItem) -> Void
     let onDismiss: () -> Void
@@ -21,10 +24,17 @@ struct SearchOverlayView: View {
     @State private var dateTo: Date?
     @State private var collectionId: UUID?
     @State private var expandedDocIds: Set<UUID> = []
+    @State private var suggestions: SearchSuggestionsResponse?
+    @State private var suggestionsTask: Task<Void, Never>?
     @FocusState private var isFieldFocused: Bool
 
     private var resultCount: Int {
         searchMode == .passages ? groupedPassageResults.count : documentResults.count
+    }
+
+    private var hasSuggestions: Bool {
+        guard let s = suggestions else { return false }
+        return !s.recentSearches.isEmpty || !s.entities.isEmpty || !s.documents.isEmpty
     }
 
     /// Group passage results by document for "More from this document" expansion.
@@ -52,6 +62,10 @@ struct SearchOverlayView: View {
                 dateTo: $dateTo,
                 collectionId: $collectionId
             )
+            if hasSuggestions && resultCount == 0 {
+                Divider()
+                suggestionsView
+            }
             Divider()
             resultsList
             if resultCount > 0 || isSearching {
@@ -119,6 +133,16 @@ struct SearchOverlayView: View {
                 .frame(width: 0, height: 0)
         }
         .padding(12)
+    }
+
+    @ViewBuilder
+    private var suggestionsView: some View {
+        if let s = suggestions {
+            SearchSuggestionsView(suggestions: s) { item in
+                query = item.value
+                performSearch(item.value)
+            }
+        }
     }
 
     private var resultsList: some View {
@@ -274,7 +298,26 @@ struct SearchOverlayView: View {
         )
     }
 
+    private func fetchSuggestions(_ prefix: String) {
+        suggestionsTask?.cancel()
+        guard prefix.count >= 2 else {
+            suggestions = nil
+            return
+        }
+        suggestionsTask = Task {
+            do {
+                let result = try await searchService.suggestions(query: prefix, limit: 5)
+                guard !Task.isCancelled else { return }
+                suggestions = result
+            } catch {
+                // Suggestions are best-effort
+            }
+        }
+    }
+
     private func performSearch(_ query: String) {
+        fetchSuggestions(query)
+
         guard query.count >= 2 else {
             passageResults = []
             documentResults = []
@@ -282,6 +325,7 @@ struct SearchOverlayView: View {
             totalCandidates = nil
             isSearching = false
             expandedDocIds = []
+            suggestions = nil
             Task { await searchService.cancelPendingSearch() }
             return
         }
@@ -292,7 +336,13 @@ struct SearchOverlayView: View {
         switch searchMode {
         case .passages:
             Task {
-                await searchService.debouncedSearch(query: query, filters: filters) { @Sendable result in
+                await searchService.debouncedSearch(
+                    query: query,
+                    topK: defaultTopK,
+                    filters: filters,
+                    rerank: defaultRerank,
+                    includeGraph: defaultIncludeGraph
+                ) { @Sendable result in
                     Task { @MainActor in
                         isSearching = false
                         switch result {
@@ -310,7 +360,13 @@ struct SearchOverlayView: View {
             }
         case .documents:
             Task {
-                await searchService.debouncedSearchDocuments(query: query, filters: filters) { @Sendable result in
+                await searchService.debouncedSearchDocuments(
+                    query: query,
+                    topK: defaultTopK,
+                    filters: filters,
+                    rerank: defaultRerank,
+                    includeGraph: defaultIncludeGraph
+                ) { @Sendable result in
                     Task { @MainActor in
                         isSearching = false
                         switch result {

@@ -136,6 +136,17 @@ class PGEntityRepository:
             result = await session.scalar(stmt)
             return result or 0
 
+    async def search_by_prefix(self, prefix: str, limit: int = 5) -> list[Entity]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(EntityRow)
+                .where(EntityRow.name.ilike(f"{prefix}%"))
+                .order_by(EntityRow.mention_count.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [self._to_domain(row) for row in result.scalars().all()]
+
     async def delete_by_document(self, document_id: UUID) -> None:
         """Delete mentions for a document, recompute counts, remove orphaned entities."""
         async with self._session_factory() as session:

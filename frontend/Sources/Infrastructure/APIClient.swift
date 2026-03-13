@@ -124,6 +124,17 @@ package actor APIClient: Sendable {
     }
 }
 
+extension CharacterSet {
+    /// Characters safe inside a URL query parameter value.
+    /// `.urlQueryAllowed` still permits `&`, `=`, `+`, and `#` which are
+    /// delimiters in a query string and must be percent-encoded in values.
+    static let urlQueryValueAllowed: CharacterSet = {
+        var cs = CharacterSet.urlQueryAllowed
+        cs.remove(charactersIn: "&=+#")
+        return cs
+    }()
+}
+
 package enum APIError: Error, LocalizedError {
     case invalidResponse
     case httpError(statusCode: Int)

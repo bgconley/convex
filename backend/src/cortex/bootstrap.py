@@ -1,3 +1,4 @@
+from cortex.application.collection_service import CollectionService
 from cortex.application.document_service import DocumentService
 from cortex.application.entity_service import EntityService
 from cortex.application.ingestion_service import IngestionService
@@ -13,6 +14,7 @@ from cortex.infrastructure.ml.tei_embedder import TEIEmbedder
 from cortex.infrastructure.persistence.chunk_repo import PGChunkRepository
 from cortex.infrastructure.persistence.entity_repo import PGEntityRepository
 from cortex.infrastructure.persistence.database import create_session_factory
+from cortex.infrastructure.persistence.collection_repo import PGCollectionRepository
 from cortex.infrastructure.persistence.document_repo import PGDocumentRepository
 from cortex.settings import Settings
 
@@ -44,6 +46,7 @@ class CompositionRoot:
         self.reranker = MxbaiReranker(base_url=settings.reranker_url)
         self.ner = GlinerNER(base_url=settings.ner_url)
         self.entity_repo = PGEntityRepository(self.session_factory)
+        self.collection_repo = PGCollectionRepository(self.session_factory)
         self.graph_repo = AGEGraphRepository(self.session_factory)
 
         # Application services (depend on ports, not concrete types)
@@ -70,6 +73,10 @@ class CompositionRoot:
             graph_repo=self.graph_repo,
         )
 
+        self.collection_service = CollectionService(
+            collection_repo=self.collection_repo,
+        )
+
         self.graph_search = GraphSearchAdapter(
             session_factory=self.session_factory,
             graph_repo=self.graph_repo,
@@ -82,4 +89,5 @@ class CompositionRoot:
             reranker=self.reranker,
             ner=self.ner,
             graph_search=self.graph_search,
+            entity_repo=self.entity_repo,
         )

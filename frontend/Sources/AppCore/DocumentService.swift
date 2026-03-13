@@ -29,6 +29,14 @@ package actor DocumentService {
     }
 
     package func toggleFavorite(document: Document) async throws -> Document {
-        try await docRepo.update(id: document.id, title: nil, tags: nil, isFavorite: !document.isFavorite)
+        try await docRepo.update(id: document.id, title: nil, tags: nil, isFavorite: !document.isFavorite, collectionId: nil)
+    }
+
+    package func setCollection(documentId: UUID, collectionId: UUID?) async throws -> Document {
+        try await docRepo.update(id: documentId, title: nil, tags: nil, isFavorite: nil, collectionId: collectionId)
+    }
+
+    package func updateTags(documentId: UUID, tags: [String]) async throws -> Document {
+        try await docRepo.update(id: documentId, title: nil, tags: tags, isFavorite: nil, collectionId: nil)
     }
 }

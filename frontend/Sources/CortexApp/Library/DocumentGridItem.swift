@@ -5,9 +5,15 @@ import Infrastructure
 struct DocumentGridItem: View {
     let document: Document
     let thumbnailLoader: ThumbnailLoader
+    let collections: [Collection]
     let onSelect: () -> Void
     let onToggleFavorite: () -> Void
+    let onMoveToCollection: (UUID?) -> Void
     let onDelete: () -> Void
+
+    private var manualCollections: [Collection] {
+        collections.filter { !$0.isSmart }
+    }
 
     @State private var thumbnail: NSImage?
 
@@ -66,6 +72,7 @@ struct DocumentGridItem: View {
             }
         }
         .buttonStyle(.plain)
+        .draggable(document.id.uuidString)
         .contextMenu {
             Button("Open") { onSelect() }
             Divider()
@@ -76,6 +83,21 @@ struct DocumentGridItem: View {
                     document.isFavorite ? "Remove from Favorites" : "Add to Favorites",
                     systemImage: document.isFavorite ? "star.slash" : "star"
                 )
+            }
+            if manualCollections.count > 0 {
+                Menu("Move to Collection") {
+                    ForEach(manualCollections) { collection in
+                        Button {
+                            onMoveToCollection(collection.id)
+                        } label: {
+                            Label(collection.name, systemImage: collection.icon ?? "folder")
+                        }
+                    }
+                    Divider()
+                    Button("Remove from Collection") {
+                        onMoveToCollection(nil)
+                    }
+                }
             }
             Divider()
             Button(role: .destructive) {

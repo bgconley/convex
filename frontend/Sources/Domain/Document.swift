@@ -93,6 +93,7 @@ package struct Document: Sendable, Equatable, Codable, Identifiable {
     package var tags: [String]
     package var isFavorite: Bool
     package var collectionId: UUID?
+    package var contentPreview: String?
     package let createdAt: Date
     package var updatedAt: Date
     package var processedAt: Date?
@@ -108,6 +109,7 @@ package struct Document: Sendable, Equatable, Codable, Identifiable {
         case wordCount = "word_count"
         case isFavorite = "is_favorite"
         case collectionId = "collection_id"
+        case contentPreview = "content_preview"
         case createdAt = "created_at"
         case updatedAt = "updated_at"
         case processedAt = "processed_at"

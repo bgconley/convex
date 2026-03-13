@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select, update, delete
+from sqlalchemy import func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from cortex.domain.document import Document, DocumentMetadata, FileType, ProcessingStatus
@@ -66,6 +66,7 @@ class PGDocumentRepository:
         file_type: str | None = None,
         status: str | None = None,
         collection_id: UUID | None = None,
+        tags: list[str] | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[Document]:
@@ -77,6 +78,8 @@ class PGDocumentRepository:
                 stmt = stmt.where(DocumentRow.status == status)
             if collection_id is not None:
                 stmt = stmt.where(DocumentRow.collection_id == collection_id)
+            if tags is not None and len(tags) > 0:
+                stmt = stmt.where(DocumentRow.tags.overlap(tags))
             stmt = stmt.limit(limit).offset(offset)
             result = await session.execute(stmt)
             return [self._to_domain(row) for row in result.scalars().all()]
@@ -86,6 +89,7 @@ class PGDocumentRepository:
         file_type: str | None = None,
         status: str | None = None,
         collection_id: UUID | None = None,
+        tags: list[str] | None = None,
     ) -> int:
         from sqlalchemy import func
 
@@ -97,6 +101,8 @@ class PGDocumentRepository:
                 stmt = stmt.where(DocumentRow.status == status)
             if collection_id is not None:
                 stmt = stmt.where(DocumentRow.collection_id == collection_id)
+            if tags is not None and len(tags) > 0:
+                stmt = stmt.where(DocumentRow.tags.overlap(tags))
             result = await session.execute(stmt)
             return result.scalar_one()
 
@@ -150,6 +156,31 @@ class PGDocumentRepository:
             stmt = delete(DocumentRow).where(DocumentRow.id == document_id)
             await session.execute(stmt)
             await session.commit()
+
+    async def search_by_title_prefix(self, prefix: str, limit: int = 5) -> list[Document]:
+        async with self._session_factory() as session:
+            stmt = (
+                select(DocumentRow)
+                .where(DocumentRow.title.ilike(f"{prefix}%"))
+                .order_by(DocumentRow.updated_at.desc())
+                .limit(limit)
+            )
+            result = await session.execute(stmt)
+            return [self._to_domain(row) for row in result.scalars().all()]
+
+    async def total_file_size(self) -> int:
+        async with self._session_factory() as session:
+            stmt = select(func.coalesce(func.sum(DocumentRow.file_size_bytes), 0))
+            result = await session.execute(stmt)
+            return result.scalar_one()
+
+    async def distinct_tags(self) -> list[str]:
+        async with self._session_factory() as session:
+            stmt = select(
+                func.unnest(DocumentRow.tags).label("tag")
+            ).distinct().order_by("tag")
+            result = await session.execute(stmt)
+            return [row[0] for row in result.all()]
 
     @staticmethod
     def _to_domain(row: DocumentRow) -> Document:

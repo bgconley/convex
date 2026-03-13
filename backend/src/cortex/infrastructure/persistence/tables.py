@@ -33,6 +33,7 @@ class CollectionRow(Base):
         UUID(as_uuid=True), ForeignKey("collections.id")
     )
     sort_order: Mapped[int] = mapped_column(Integer, default=0)
+    filter_json: Mapped[dict | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
 

@@ -24,5 +24,6 @@ struct DocumentListRow: View {
                     .foregroundStyle(.yellow)
             }
         }
+        .draggable(document.id.uuidString)
     }
 }
