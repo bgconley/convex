@@ -2,66 +2,34 @@ import SwiftUI
 
 struct SpreadsheetView: View {
     let spreadsheetJSON: String
-    let originalURL: URL?
     let anchorId: String?
     var searchQuery: String = ""
-
-    @State private var viewMode: ViewRepresentation = .structured
 
     private var workbook: SpreadsheetWorkbook? {
         guard let data = spreadsheetJSON.data(using: .utf8) else { return nil }
         return try? JSONDecoder().decode(SpreadsheetWorkbook.self, from: data)
     }
 
-    enum ViewRepresentation: String, CaseIterable {
-        case structured = "Structured"
-        case original = "Original"
-    }
-
     var body: some View {
         Group {
-            switch viewMode {
-            case .structured:
-                if let workbook, !workbook.sheets.isEmpty {
-                    SpreadsheetStructuredView(
-                        workbook: workbook,
-                        anchorId: anchorId,
-                        searchQuery: searchQuery
-                    )
-                } else {
-                    ContentUnavailableView(
-                        "Spreadsheet content unavailable",
-                        systemImage: "tablecells.badge.ellipsis",
-                        description: Text("Structured spreadsheet data was not returned by the backend.")
-                    )
-                }
-            case .original:
-                if let originalURL {
-                    QuickLookView(url: originalURL)
-                } else {
-                    ContentUnavailableView(
-                        "Original file unavailable",
-                        systemImage: "tablecells.badge.exclamationmark",
-                        description: Text("Structured view is still available.")
-                    )
-                }
-            }
-        }
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                Picker("View", selection: $viewMode) {
-                    ForEach(ViewRepresentation.allCases, id: \.self) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .help("Toggle Structured / Original view")
+            if let workbook, !workbook.sheets.isEmpty {
+                SpreadsheetStructuredView(
+                    workbook: workbook,
+                    anchorId: anchorId,
+                    searchQuery: searchQuery
+                )
+            } else {
+                ContentUnavailableView(
+                    "Spreadsheet content unavailable",
+                    systemImage: "tablecells.badge.ellipsis",
+                    description: Text("Structured spreadsheet data was not returned by the backend.")
+                )
             }
         }
     }
 }
 
-private struct SpreadsheetStructuredView: View {
+struct SpreadsheetStructuredView: View {
     let workbook: SpreadsheetWorkbook
     let anchorId: String?
     let searchQuery: String
@@ -236,18 +204,18 @@ private struct SpreadsheetStructuredView: View {
     }
 }
 
-private struct SpreadsheetWorkbook: Decodable {
+struct SpreadsheetWorkbook: Decodable {
     let sheets: [SpreadsheetSheet]
 }
 
-private struct SpreadsheetSheet: Decodable, Identifiable {
+struct SpreadsheetSheet: Decodable, Identifiable {
     let name: String
     let rows: [SpreadsheetRow]
 
     var id: String { name }
 }
 
-private struct SpreadsheetRow: Decodable {
+struct SpreadsheetRow: Decodable {
     let id: String
     let cells: [String]
     let anchorIds: [String]

@@ -6,6 +6,7 @@ import AppCore
 
 struct ContentView: View {
     let root: CompositionRoot
+    @Environment(\.scenePhase) private var scenePhase
     @State private var healthStatus: String = "Checking..."
     @State private var selectedSidebarItem: SidebarItem = .allDocuments
     @State private var selectedDocumentId: UUID?
@@ -252,11 +253,18 @@ struct ContentView: View {
                 }
             }
             await loadAvailableEntityTypes()
+            await checkHealth()
             if !didStartSpotlightIndex {
                 didStartSpotlightIndex = true
                 Task(priority: .background) {
                     await indexAllDocumentsInSpotlight()
                 }
+            }
+        }
+        .onChange(of: scenePhase) { _, newValue in
+            guard newValue == .active else { return }
+            Task {
+                await checkHealth()
             }
         }
         .onDisappear {

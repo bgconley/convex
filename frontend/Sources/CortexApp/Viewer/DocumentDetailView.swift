@@ -15,6 +15,7 @@ struct DocumentDetailView: View {
     let pageNumber: Int?
     var onSelectEntity: ((UUID) -> Void)?
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var document: Document?
     @State private var content: DocumentContent?
     @State private var originalData: Data?
@@ -374,9 +375,43 @@ struct DocumentDetailView: View {
                 ProgressView("Loading image...")
             }
 
-        case .docx, .xlsx, .markdown, .txt:
+        case .markdown:
             if let content {
-                contentViewerByFormat(content, for: doc)
+                MarkdownDocumentView(
+                    markdownSource: content.content,
+                    renderer: markdownRenderer,
+                    anchorId: anchorId,
+                    searchQuery: findQuery
+                )
+            } else {
+                ContentUnavailableView(
+                    "Document content not available",
+                    systemImage: "doc.badge.ellipsis",
+                    description: Text("Try reprocessing this document.")
+                )
+            }
+
+        case .txt:
+            if let originalText = originalTextContent {
+                PlainTextView(content: originalText, searchQuery: findQuery)
+            } else if let content {
+                PlainTextView(content: content.content, searchQuery: findQuery)
+            } else {
+                ContentUnavailableView(
+                    "Text content unavailable",
+                    systemImage: "doc.badge.ellipsis",
+                    description: Text("The original text file could not be loaded.")
+                )
+            }
+
+        case .docx, .xlsx:
+            if let content {
+                FidelityDocumentView(
+                    originalURL: originalFileURL,
+                    defaultViewMode: doc.fileType.prefersOriginalFidelityView ? .original : .structured
+                ) {
+                    structuredViewer(for: content, document: doc)
+                }
             } else {
                 ContentUnavailableView(
                     "Document content not available",
@@ -388,19 +423,19 @@ struct DocumentDetailView: View {
     }
 
     @ViewBuilder
-    private func contentViewerByFormat(_ content: DocumentContent, for doc: Document) -> some View {
+    private func structuredViewer(for content: DocumentContent, document doc: Document) -> some View {
         switch content.format {
         case "html":
-            if doc.fileType == .docx {
-                HTMLDocumentView(
-                    htmlContent: content.content,
-                    originalURL: originalFileURL,
+            if doc.fileType == .xlsx,
+               let workbook = spreadsheetWorkbook(from: content.content) {
+                SpreadsheetStructuredView(
+                    workbook: workbook,
                     anchorId: anchorId,
                     searchQuery: findQuery
                 )
             } else {
-                HTMLWebView(
-                    html: prepareHTML(content.content),
+                HTMLDocumentView(
+                    htmlContent: content.content,
                     anchorId: anchorId,
                     searchQuery: findQuery
                 )
@@ -408,17 +443,20 @@ struct DocumentDetailView: View {
         case "spreadsheet_json":
             SpreadsheetView(
                 spreadsheetJSON: content.content,
-                originalURL: originalFileURL,
                 anchorId: anchorId,
                 searchQuery: findQuery
             )
         case "markdown":
-            MarkdownDocumentView(
-                markdownSource: content.content,
-                renderer: markdownRenderer,
-                anchorId: anchorId,
-                searchQuery: findQuery
-            )
+            if doc.fileType == .markdown {
+                MarkdownDocumentView(
+                    markdownSource: content.content,
+                    renderer: markdownRenderer,
+                    anchorId: anchorId,
+                    searchQuery: findQuery
+                )
+            } else {
+                PlainTextView(content: content.content, searchQuery: findQuery)
+            }
         case "plain_text":
             PlainTextView(content: content.content, searchQuery: findQuery)
         case "not_yet_processed":
@@ -428,7 +466,16 @@ struct DocumentDetailView: View {
                 description: Text("Structured content will appear when processing completes.")
             )
         default:
-            PlainTextView(content: content.content, searchQuery: findQuery)
+            if doc.fileType == .docx || doc.fileType == .xlsx {
+                HTMLWebView(
+                    html: prepareHTML(content.content),
+                    anchorId: anchorId,
+                    searchQuery: findQuery,
+                    colorScheme: colorScheme
+                )
+            } else {
+                PlainTextView(content: content.content, searchQuery: findQuery)
+            }
         }
     }
 
@@ -455,12 +502,24 @@ struct DocumentDetailView: View {
                 content = docContent
                 do {
                     let data = try await apiClient.getData("documents/\(documentId.uuidString)/original")
+                    originalData = data
                     originalFileURL = try writeOriginalTempFile(data: data, filename: doc.originalFilename)
                 } catch {
                     // Structured content remains usable even if fidelity view is unavailable.
                 }
 
-            case .markdown, .txt:
+            case .txt:
+                let docContent = try await documentService.getContent(id: documentId)
+                content = docContent
+                do {
+                    let data = try await apiClient.getData("documents/\(documentId.uuidString)/original")
+                    originalData = data
+                    originalFileURL = try writeOriginalTempFile(data: data, filename: doc.originalFilename)
+                } catch {
+                    // Fallback to extracted content if original retrieval fails.
+                }
+
+            case .markdown:
                 let docContent = try await documentService.getContent(id: documentId)
                 content = docContent
             }
@@ -506,5 +565,18 @@ struct DocumentDetailView: View {
             .appendingPathComponent("\(documentId.uuidString)_\(safeFilename)")
         try data.write(to: tempURL, options: .atomic)
         return tempURL
+    }
+
+    private var originalTextContent: String? {
+        guard let originalData else { return nil }
+        if let text = String(data: originalData, encoding: .utf8) {
+            return text
+        }
+        return String(decoding: originalData, as: UTF8.self)
+    }
+
+    private func spreadsheetWorkbook(from content: String) -> SpreadsheetWorkbook? {
+        guard let data = content.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(SpreadsheetWorkbook.self, from: data)
     }
 }

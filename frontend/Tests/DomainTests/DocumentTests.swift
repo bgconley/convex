@@ -19,4 +19,18 @@ final class DocumentTests: XCTestCase {
         XCTAssertFalse(ProcessingStatus.ready.isProcessing)
         XCTAssertFalse(ProcessingStatus.failed.isProcessing)
     }
+
+    func testViewerRepresentationPolicy() {
+        XCTAssertFalse(FileType.markdown.prefersOriginalFidelityView)
+
+        for fileType in [FileType.pdf, .docx, .xlsx, .txt, .png, .jpg, .tiff] {
+            XCTAssertTrue(fileType.prefersOriginalFidelityView, "\(fileType) should prefer original fidelity")
+        }
+
+        XCTAssertTrue(FileType.docx.supportsStructuredFallbackView)
+        XCTAssertTrue(FileType.xlsx.supportsStructuredFallbackView)
+        XCTAssertFalse(FileType.pdf.supportsStructuredFallbackView)
+        XCTAssertFalse(FileType.txt.supportsStructuredFallbackView)
+        XCTAssertFalse(FileType.markdown.supportsStructuredFallbackView)
+    }
 }

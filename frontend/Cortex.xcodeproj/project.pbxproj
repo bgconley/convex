@@ -1,0 +1,370 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		018E9E39F47AFCA30C526854 /* Cocoa.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 217E48C7CA4936587A24A0A0 /* Cocoa.framework */; };
+		33335B38CF213F73C39E2E3E /* CortexApp in Frameworks */ = {isa = PBXBuildFile; productRef = 5E3599501CAF7D275F7B97F1 /* CortexApp */; };
+		70DA7E6A03BE44BE75EC15DA /* CortexHostApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 46F4347711C58E3956C36E37 /* CortexHostApp.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		217E48C7CA4936587A24A0A0 /* Cocoa.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Cocoa.framework; path = Platforms/MacOSX.platform/Developer/SDKs/MacOSX15.0.sdk/System/Library/Frameworks/Cocoa.framework; sourceTree = DEVELOPER_DIR; };
+		46F4347711C58E3956C36E37 /* CortexHostApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = CortexHostApp.swift; path = AppHost/Sources/CortexHostApp.swift; sourceTree = "<group>"; };
+		A397DE2E331E058A1905182D /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Info.plist; path = AppHost/Config/Info.plist; sourceTree = "<group>"; };
+		EE5D74C06562AF5DFC42B9B8 /* CortexMac.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CortexMac.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		63D881194B3712898A1119AA /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				018E9E39F47AFCA30C526854 /* Cocoa.framework in Frameworks */,
+				33335B38CF213F73C39E2E3E /* CortexApp in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		45A201278A65009164E8A475 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				46F4347711C58E3956C36E37 /* CortexHostApp.swift */,
+			);
+			name = Sources;
+			sourceTree = "<group>";
+		};
+		5C1E7AC4B86C9187A400A892 /* AppHost */ = {
+			isa = PBXGroup;
+			children = (
+				45A201278A65009164E8A475 /* Sources */,
+				D0C7815A149CD07CE26972AE /* Config */,
+			);
+			name = AppHost;
+			sourceTree = "<group>";
+		};
+		7E776DF4739F6666C9EF7C91 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				F59C25DA0108CE851CB7902C /* OS X */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		AFC0CAAF26D6C500AE457A1A = {
+			isa = PBXGroup;
+			children = (
+				DA01ADAC71CADD6973B4F0BF /* Products */,
+				7E776DF4739F6666C9EF7C91 /* Frameworks */,
+				5C1E7AC4B86C9187A400A892 /* AppHost */,
+			);
+			sourceTree = SOURCE_ROOT;
+		};
+		D0C7815A149CD07CE26972AE /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				A397DE2E331E058A1905182D /* Info.plist */,
+			);
+			name = Config;
+			sourceTree = "<group>";
+		};
+		DA01ADAC71CADD6973B4F0BF /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				EE5D74C06562AF5DFC42B9B8 /* CortexMac.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		F59C25DA0108CE851CB7902C /* OS X */ = {
+			isa = PBXGroup;
+			children = (
+				217E48C7CA4936587A24A0A0 /* Cocoa.framework */,
+			);
+			name = "OS X";
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		1155F4AAB4B1D6248780913D /* CortexMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 4599017A40EC3124D08C1C0E /* Build configuration list for PBXNativeTarget "CortexMac" */;
+			buildPhases = (
+				1E7FBFC1AA31551741F811B6 /* Sources */,
+				63D881194B3712898A1119AA /* Frameworks */,
+				CC7DEF8D97370E1FBFBBBFBC /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				826A6C328C1CB87AB1DCAF97 /* PBXTargetDependency */,
+			);
+			name = CortexMac;
+			packageProductDependencies = (
+				5E3599501CAF7D275F7B97F1 /* CortexApp */,
+			);
+			productName = Cortex;
+			productReference = EE5D74C06562AF5DFC42B9B8 /* CortexMac.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		809C167BAB36B9C78999B688 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 2600;
+				LastUpgradeCheck = 2600;
+			};
+			buildConfigurationList = DD93F50CDFD940CA48679EE9 /* Build configuration list for PBXProject "Cortex" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = AFC0CAAF26D6C500AE457A1A;
+			minimizedProjectReferenceProxies = 0;
+			packageReferences = (
+				0936F0F12F4CEE7A32BF5FA3 /* XCLocalSwiftPackageReference "." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = DA01ADAC71CADD6973B4F0BF /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				1155F4AAB4B1D6248780913D /* CortexMac */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		CC7DEF8D97370E1FBFBBBFBC /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		1E7FBFC1AA31551741F811B6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				70DA7E6A03BE44BE75EC15DA /* CortexHostApp.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		826A6C328C1CB87AB1DCAF97 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			productRef = 5E3599501CAF7D275F7B97F1 /* CortexApp */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		928017D260AA14234F2CC221 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AppHost/Config/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brennanconley.cortex;
+				PRODUCT_NAME = Cortex;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Release;
+		};
+		CEA02ABA1C99A7B2BEA80FBD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		F76BDA281C2D1E93C71C322A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		FFE13EFC5A1F5B389E136843 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = NO;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = AppHost/Config/Info.plist;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
+				MACOSX_DEPLOYMENT_TARGET = 14.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.brennanconley.cortex;
+				PRODUCT_NAME = Cortex;
+				SDKROOT = macosx;
+				SWIFT_VERSION = 6.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		4599017A40EC3124D08C1C0E /* Build configuration list for PBXNativeTarget "CortexMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				928017D260AA14234F2CC221 /* Release */,
+				FFE13EFC5A1F5B389E136843 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD93F50CDFD940CA48679EE9 /* Build configuration list for PBXProject "Cortex" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				F76BDA281C2D1E93C71C322A /* Debug */,
+				CEA02ABA1C99A7B2BEA80FBD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		0936F0F12F4CEE7A32BF5FA3 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		5E3599501CAF7D275F7B97F1 /* CortexApp */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 0936F0F12F4CEE7A32BF5FA3 /* XCLocalSwiftPackageReference "." */;
+			productName = CortexApp;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 809C167BAB36B9C78999B688 /* Project object */;
+}

@@ -5,7 +5,11 @@ let package = Package(
     name: "Cortex",
     platforms: [.macOS(.v14)],
     products: [
-        .executable(name: "Cortex", targets: ["CortexApp"]),
+        .library(name: "Domain", targets: ["Domain"]),
+        .library(name: "AppCore", targets: ["AppCore"]),
+        .library(name: "Infrastructure", targets: ["Infrastructure"]),
+        .library(name: "Bootstrap", targets: ["Bootstrap"]),
+        .library(name: "CortexApp", targets: ["CortexApp"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-markdown", from: "0.4.0"),
@@ -26,8 +30,8 @@ let package = Package(
         // Bootstrap: composition root + settings. Depends on all above.
         .target(name: "Bootstrap", dependencies: ["Domain", "AppCore", "Infrastructure"]),
 
-        // CortexApp: SwiftUI views + @main entry point. Depends on Bootstrap.
-        .executableTarget(name: "CortexApp", dependencies: ["Bootstrap"]),
+        // CortexApp: SwiftUI application module. Depends on Bootstrap.
+        .target(name: "CortexApp", dependencies: ["Bootstrap"]),
 
         // Tests aligned with architecture
         .testTarget(name: "DomainTests", dependencies: ["Domain"]),

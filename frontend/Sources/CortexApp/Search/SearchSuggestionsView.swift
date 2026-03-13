@@ -41,9 +41,7 @@ struct SearchSuggestionsView: View {
                 } label: {
                     HStack(spacing: 8) {
                         if item.type == "entity", let entityType = item.entityType {
-                            EntityChipView(name: item.label, entityType: entityType) {
-                                onSelect(item)
-                            }
+                            EntityChipView(name: item.label, entityType: entityType)
                         } else {
                             Text(item.label)
                                 .font(.subheadline)

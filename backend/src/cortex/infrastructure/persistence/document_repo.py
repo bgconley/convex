@@ -116,6 +116,8 @@ class PGDocumentRepository:
             }
             if error_message is not None:
                 values["error_message"] = error_message
+            elif status != ProcessingStatus.FAILED.value:
+                values["error_message"] = None
             if status == ProcessingStatus.READY.value:
                 values["processed_at"] = datetime.now(UTC)
             stmt = (

@@ -7,24 +7,32 @@ struct EntityChipView: View {
     var action: (() -> Void)?
 
     var body: some View {
-        Button {
-            action?()
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: iconName)
-                    .font(.caption2)
-                Text(name)
-                    .font(.caption)
-                    .lineLimit(1)
+        Group {
+            if let action {
+                Button(action: action) {
+                    chipLabel
+                }
+                .buttonStyle(.plain)
+            } else {
+                chipLabel
             }
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(chipColor.opacity(0.15))
-            .foregroundStyle(chipColor)
-            .clipShape(Capsule())
         }
-        .buttonStyle(.plain)
-        .help("\(entityType): \(name)")
+        .help(Text(verbatim: "\(entityType): \(name)"))
+    }
+
+    private var chipLabel: some View {
+        HStack(spacing: 4) {
+            Image(systemName: iconName)
+                .font(.caption2)
+            Text(name)
+                .font(.caption)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(chipColor.opacity(0.15))
+        .foregroundStyle(chipColor)
+        .clipShape(Capsule())
     }
 
     private var chipColor: Color {

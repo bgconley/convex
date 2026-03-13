@@ -2,12 +2,13 @@ import SwiftUI
 import Bootstrap
 import Domain
 
-@main
-struct CortexApp: App {
+public struct CortexPackageScene: Scene {
     @State private var root: CompositionRoot?
     @State private var showOnboarding = false
 
-    var body: some Scene {
+    public init() {}
+
+    public var body: some Scene {
         WindowGroup {
             Group {
                 if let root {
@@ -25,25 +26,28 @@ struct CortexApp: App {
                         showOnboarding = false
                     },
                     onSkip: {
-                        Bootstrap.Settings().save()
+                        let settings = Bootstrap.Settings()
+                        settings.save()
+                        root = CompositionRoot(settings: settings)
                         showOnboarding = false
                     }
                 )
                 .interactiveDismissDisabled()
             }
             .onAppear {
+                guard root == nil else { return }
+
                 if !Bootstrap.Settings.hasBeenConfigured {
-                    root = CompositionRoot()
                     showOnboarding = true
                 } else {
-                    root = CompositionRoot()
+                    root = CompositionRoot(settings: .load())
                 }
             }
         }
         .commands {
             CommandGroup(replacing: .appSettings) {
-                Button("Settings...") {
-                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                SettingsLink {
+                    Text("Settings...")
                 }
                 .keyboardShortcut(",", modifiers: .command)
             }

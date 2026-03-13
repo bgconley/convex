@@ -16,7 +16,7 @@ struct DocumentListRow: View {
             } else if document.status == .failed {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(.red)
-                    .help(document.errorMessage ?? "Processing failed")
+                    .help(Text(verbatim: document.errorMessage ?? "Processing failed"))
             }
             if document.isFavorite {
                 Image(systemName: "star.fill")

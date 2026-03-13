@@ -33,6 +33,19 @@ package enum FileType: String, Sendable, Codable, CaseIterable {
         case .tiff: "TIFF"
         }
     }
+
+    package var prefersOriginalFidelityView: Bool {
+        self != .markdown
+    }
+
+    package var supportsStructuredFallbackView: Bool {
+        switch self {
+        case .docx, .xlsx:
+            true
+        default:
+            false
+        }
+    }
 }
 
 package enum ProcessingStatus: String, Sendable, Codable {

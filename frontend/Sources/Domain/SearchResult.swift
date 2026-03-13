@@ -158,11 +158,19 @@ package struct SuggestionItem: Sendable, Codable, Identifiable, Equatable {
     package let value: String
     package let label: String
     package let type: String
-    package let id: UUID?
+    package let resourceId: UUID?
     package let entityType: String?
 
+    package var id: String {
+        if let resourceId {
+            return resourceId.uuidString
+        }
+        return "\(type)|\(entityType ?? "")|\(value)"
+    }
+
     package enum CodingKeys: String, CodingKey {
-        case value, label, type, id
+        case value, label, type
+        case resourceId = "id"
         case entityType = "entity_type"
     }
 }

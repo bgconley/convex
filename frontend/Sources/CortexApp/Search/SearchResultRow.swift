@@ -39,7 +39,7 @@ struct SearchResultRow: View {
 
                 HStack(spacing: 12) {
                     scoreLabel
-                        .help(scoreTooltip)
+                        .help(Text(verbatim: scoreTooltip))
 
                     if let page = item.pageNumber {
                         Text("p. \(page)")
@@ -123,7 +123,7 @@ struct DocumentSearchResultRow: View {
                         .font(.caption2)
                         .monospacedDigit()
                         .foregroundStyle(.secondary)
-                        .help(docScoreTooltip)
+                        .help(Text(verbatim: docScoreTooltip))
 
                     if let page = item.bestChunkPage {
                         Text("p. \(page)")

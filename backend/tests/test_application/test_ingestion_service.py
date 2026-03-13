@@ -63,7 +63,10 @@ class FakeDocRepo:
     ) -> None:
         assert document_id == self.doc.id
         self.doc.status = ProcessingStatus(status)
-        self.doc.error_message = error_message
+        if error_message is not None:
+            self.doc.error_message = error_message
+        elif status != ProcessingStatus.FAILED.value:
+            self.doc.error_message = None
         self.status_updates.append(status)
         self.error_messages.append(error_message)
 
@@ -163,3 +166,38 @@ async def test_ingest_cleans_up_partial_artifacts_after_failure(tmp_path: Path):
     assert doc_repo.status_updates[-1] == ProcessingStatus.FAILED.value
     assert doc.status == ProcessingStatus.FAILED
     assert doc.error_message == "Ingestion failed: see worker logs"
+
+
+@pytest.mark.asyncio
+async def test_ingest_clears_stale_error_message_after_success(tmp_path: Path):
+    source = tmp_path / "source.txt"
+    source.write_text("Grace Hopper built compilers.")
+
+    doc = Document.new(
+        title="Grace Hopper",
+        original_filename="source.txt",
+        file_type=FileType.TXT,
+        file_size_bytes=source.stat().st_size,
+        file_hash="hash-2",
+        mime_type="text/plain",
+        original_path="originals/source.txt",
+    )
+    doc.status = ProcessingStatus.FAILED
+    doc.error_message = "Ingestion failed: see worker logs"
+
+    doc_repo = FakeDocRepo(doc)
+    chunk_repo = FakeChunkRepo()
+
+    service = IngestionService(
+        parser=FakeParser(),
+        chunker=FakeChunker(),
+        embedder=FakeEmbedder(),
+        doc_repo=doc_repo,
+        chunk_repo=chunk_repo,
+        file_storage=FakeFileStorage(source),
+    )
+
+    await service.ingest(doc.id)
+
+    assert doc.status == ProcessingStatus.READY
+    assert doc.error_message is None
